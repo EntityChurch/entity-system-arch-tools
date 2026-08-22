@@ -5,10 +5,10 @@
 # spec-tool/tests/parity.sh). This is a standalone tool repo: it carries no spec
 # corpus itself — point the gates at a corpus you bind-mount (see check-podman).
 #
-#   make check                 run both gates locally (style + standards)
-#   make check-podman          run both gates hermetically (one container)
-#   make style                 naming gate only
-#   make standards             release-readiness gate only
+#   make check CORPUS=<path>   run both gates locally (style + standards)
+#   make check-podman CORPUS=… run both gates hermetically (one container)
+#   make style CORPUS=<path>   naming gate only
+#   make standards CORPUS=…    release-readiness gate only
 #   make tree SPEC=<spec.md>   structural tree of one spec
 #   make render SPEC=<spec.md> all catalogs of one spec
 #   make topology              corpus dependency graph
@@ -20,9 +20,10 @@ SPEC   ?=
 IMAGE  ?= entity-spec:latest
 CLI    := spec-tool/cli.py
 
-# This standalone repo IS the tool root. The gates run against a spec corpus
-# bind-mounted at /work; override CORPUS=<path> to point check-podman at one
-# (defaults to this repo, which carries no specs — so check is a smoke run).
+# This standalone repo IS the tool root and carries NO corpus. Every gate runs
+# against a corpus you name: CORPUS=<path to a spec repo> (host-native and
+# hermetic alike). It defaults to this repo only so an un-parameterized run
+# fails loudly with "could not look" rather than silently scanning nothing.
 REPO   := $(CURDIR)
 CORPUS ?= $(CURDIR)
 
@@ -52,20 +53,23 @@ help:
 	@echo "  NOTE: 'check' above is the SPEC gate (style+standards), not lint+test."
 
 # --- gates ---
+# All three take CORPUS=<path to a spec repo>. With CORPUS unset they run
+# against this repo, which carries no `specs/` — so they exit 2 (could not
+# look), loudly, instead of reporting a gate result over an empty file set.
 check:
-	@$(PYTHON) $(CLI) check
+	@$(PYTHON) $(CLI) --corpus $(CORPUS) check
 
 style:
-	@$(PYTHON) $(CLI) style
+	@$(PYTHON) $(CLI) --corpus $(CORPUS) style
 
 standards:
-	@$(PYTHON) $(CLI) standards
+	@$(PYTHON) $(CLI) --corpus $(CORPUS) standards
 
-# Hermetic: bind-mount the repo read-only at /work and run the CLI from there,
-# so REPO_ROOT and sibling imports resolve against the live tree (image stays
-# corpus-free). `spec check` exits non-zero if either gate fails.
+# Hermetic: bind-mount the corpus read-only at /work, with /work as both cwd
+# and corpus root (the image stays corpus-free). Exits 1 on violations, 2 if it
+# could not look.
 check-podman: build
-	podman run --rm -v $(CORPUS):/work:ro,Z -w /work $(IMAGE) /opt/spec-tool/cli.py check
+	podman run --rm -v $(CORPUS):/work:ro,Z -w /work $(IMAGE) /opt/spec-tool/cli.py --corpus /work check
 
 build:
 	podman build -t $(IMAGE) -f spec-tool/Containerfile .

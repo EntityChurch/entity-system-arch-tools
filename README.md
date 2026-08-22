@@ -29,15 +29,25 @@ Stdlib-only Python; the reader commands always exit 0, the gates exit non-zero o
 ## Usage
 
 ```
-make check            # run both gates locally
-make check-podman     # run both gates hermetically (one container)
-make topology         # corpus graph
-make render SPEC=…    # catalogs for one spec
+make check CORPUS=/path/to/spec-repo         # run both gates locally
+make check-podman CORPUS=/path/to/spec-repo  # run both gates hermetically (one container)
+make topology CORPUS=…                       # corpus graph
+make render SPEC=…                           # catalogs for one spec
+```
+
+Or straight from inside the corpus, which is where you usually are:
+
+```
+cd /path/to/spec-repo && python3 /path/to/spec-tool/cli.py check
 ```
 
 It lints a **target spec repo** (`entity-core-protocol` / `entity-system-architecture`), supplied
-as the corpus root. (Standalone-operation note: the root is taken from the target mount/`--root`,
-not the tool's own location.)
+as the corpus root. The corpus resolves as `--corpus PATH` → `$SPEC_CORPUS` → the working
+directory — **never** from the tool's own location, which this repo shares with no corpus.
+
+Gate exit codes are three-valued, and the third one matters: **0** looked and found nothing,
+**1** found violations, **2** could not look (empty corpus / bad root). A gate that scanned zero
+files has not passed.
 
 ## License
 

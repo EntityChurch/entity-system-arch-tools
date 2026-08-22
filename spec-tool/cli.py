@@ -15,17 +15,32 @@ that reads the one shared model (`model.py`) and the one config
     spec check                                             run both gates (style + standards)
     spec config [CONFIG.toml]                              print the resolved config
 
-`check` exits non-zero if either gate fails. Gates (`standards`, `style`,
-`check`) exit non-zero on violations; readers always exit 0.
+Any invocation may lead with `--corpus PATH` to name the corpus to analyze
+(equivalently `$SPEC_CORPUS`; default: the working directory). This repo ships
+no corpus — you always point the tool at one.
+
+Gates (`standards`, `style`, `check`) exit **1** on violations and **2** when
+they could not look (empty corpus / bad root); readers always exit 0. Those two
+are not the same result and are not reported as the same result.
 
 Stdlib-only Python 3.11+. Run as `python3 tools/spec/cli.py <subcommand> …`.
 """
 
+import os
 import sys
 from pathlib import Path
 
-import address
 import config as _config
+
+# `--corpus PATH` is honoured BEFORE the analyzer modules are imported: each of
+# them resolves its default scope root at import time, so an env var set later
+# (in main) would arrive after the decision it governs. Reading argv here is the
+# price of that import-time resolution; the alternative is making four modules'
+# scope defaults lazy, which is the phase-2 cleanup.
+if len(sys.argv) > 2 and sys.argv[1] == "--corpus":
+    os.environ[_config.CORPUS_ENV] = sys.argv[2]
+
+import address
 import model
 import render
 import standards
@@ -51,7 +66,13 @@ def cmd_check(argv):
     Non-zero exit if either gate reports violations. Output is each gate's own
     report, in order, separated by a banner — a convenience over running the
     two subcommands by hand; the per-gate output is byte-identical to running
-    them individually."""
+    them individually.
+
+    Exit codes are three-valued, and the distinction is load-bearing:
+    0 = both gates looked and found nothing; 1 = a gate found violations;
+    2 = a gate could not look (empty corpus). Collapsing 2 into "fail" is how
+    a stale corpus root read as a lint failure for a year — the report named
+    the wrong defect, so nobody went looking for the right one."""
     if argv:
         print("spec check takes no arguments", file=sys.stderr)
         return 2
@@ -59,11 +80,22 @@ def cmd_check(argv):
     rc_style = style.main([])
     print("\n=== spec standards ===")
     rc_standards = standards.main([])
+
+    def verdict(rc):
+        return "could-not-look" if rc == 2 else ("fail" if rc else "pass")
+
+    if 2 in (rc_style, rc_standards):
+        print("\n✗ a gate could not look — style=%s standards=%s"
+              % (verdict(rc_style), verdict(rc_standards)))
+        print("  This is NOT a lint failure: a gate scanned zero files. Fix the corpus")
+        print("  root (`spec --corpus PATH check`, $SPEC_CORPUS, or run from the corpus)")
+        print("  and re-run before reading anything into either result.")
+        return 2
+
     rc = 1 if (rc_style or rc_standards) else 0
     print("\n%s — style=%s standards=%s"
           % ("✓ both gates passed" if rc == 0 else "✗ a gate failed",
-             "fail" if rc_style else "pass",
-             "fail" if rc_standards else "pass"))
+             verdict(rc_style), verdict(rc_standards)))
     return rc
 
 
@@ -98,6 +130,16 @@ def usage(stream=sys.stdout):
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
+    # `--corpus PATH` may lead any invocation: it names the corpus this run
+    # analyzes. It is set into the environment before the analyzer modules read
+    # their scope defaults, which they do at import time. Precedence is
+    # --corpus > $SPEC_CORPUS > cwd (see config.corpus_root).
+    if argv and argv[0] == "--corpus":
+        if len(argv) < 2:
+            print("--corpus needs a PATH", file=sys.stderr)
+            return 2
+        os.environ[_config.CORPUS_ENV] = argv[1]
+        argv = argv[2:]
     if not argv or argv[0] in ("-h", "--help", "help"):
         usage()
         return 0

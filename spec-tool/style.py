@@ -289,10 +289,17 @@ def build_report(files: List[Path], policy, type_roots: Set[str]) -> Report:
 
 
 def rel(p: str) -> str:
-    try:
-        return str(Path(p).resolve().relative_to(REPO_ROOT))
-    except ValueError:
-        return p
+    """Display path, anchored on the CORPUS root so it is copy-pasteable from
+    inside the repo being linted (`specs/extensions/X.md`, not a path relative
+    to wherever the tool happens to be checked out). Falls back to the tool
+    root, then to the path as given."""
+    resolved = Path(p).resolve()
+    for anchor in (_CFG.repo_root, REPO_ROOT):
+        try:
+            return str(resolved.relative_to(anchor))
+        except ValueError:
+            continue
+    return p
 
 
 def _distinct(hits: List[Hit]) -> Dict[str, Dict[str, object]]:

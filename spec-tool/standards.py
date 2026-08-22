@@ -255,16 +255,22 @@ def refine_text(text: str) -> Tuple[str, List[str]]:
 
 # ---- reporting --------------------------------------------------------------
 def rel(path: Path) -> str:
-    try:
-        return str(path.relative_to(REPO_ROOT))
-    except ValueError:
-        return str(path)
+    """Display path, anchored on the CORPUS root so it is copy-pasteable from
+    inside the repo being linted. Falls back to the tool root, then absolute."""
+    for anchor in (_CFG.repo_root, REPO_ROOT):
+        try:
+            return str(path.relative_to(anchor))
+        except ValueError:
+            continue
+    return str(path)
 
 
 def run_check(roots: List[Path], as_json: bool, max_examples: int) -> int:
     report: Dict[str, List[Finding]] = {}
+    n_scanned = 0
     for root in roots:
         for spec in iter_specs(root):
+            n_scanned += 1
             try:
                 text = spec.read_text(encoding="utf-8")
             except Exception as exc:  # noqa: BLE001
@@ -273,6 +279,19 @@ def run_check(roots: List[Path], as_json: bool, max_examples: int) -> int:
             f = analyze(spec, text)
             if f:
                 report[rel(spec)] = f
+
+    # A gate that scanned nothing has not passed — it did not look. Printing
+    # "0 file(s) flagged — 0 error(s)" and exiting 0 is what hid a corpus root
+    # naming a directory present in no checkout: green, over an empty set,
+    # indefinitely. Exit 2 (could-not-look) is deliberately distinct from 1
+    # (violations found) so a caller can tell the two apart.
+    if n_scanned == 0:
+        print("no spec found under: %s" % ", ".join(str(r) for r in roots), file=sys.stderr)
+        print("  scanned 0 files — this is not a pass, it is a gate that did not look.",
+              file=sys.stderr)
+        print("  point it at a corpus: --root PATH, `spec --corpus PATH standards`,"
+              " $SPEC_CORPUS, or run from the corpus root.", file=sys.stderr)
+        return 2
 
     n_error = sum(1 for fs in report.values() for x in fs if x.severity() == "error")
     n_warn = sum(1 for fs in report.values() for x in fs if x.severity() == "warn")

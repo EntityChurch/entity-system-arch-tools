@@ -14,9 +14,14 @@
 # ============================================================================
 
 [corpus]
-# Resolved relative to the repo root (the tool finds it from its own location).
-# Every scope root below is relative to this.
-repo_root = "docs/architecture/v7.0-core-revision"
+# Resolved relative to the CORPUS root — the directory you point the tool at
+# (`--corpus PATH`, `$SPEC_CORPUS`, else the working directory). The tool ships
+# no corpus of its own, so it cannot derive one from its own location; it did
+# until the repo split, and the value left behind (`docs/architecture/
+# v7.0-core-revision` — a path in no post-split checkout) is what made both
+# gates scan zero files. "." means the corpus root itself, which is the
+# post-split layout every spec repo this tool serves shares: `specs/` at top.
+repo_root = "."
 
 
 # --- project vocabulary -----------------------------------------------------
@@ -105,36 +110,46 @@ default = "canonical-spec"
 # (Phase 1 has no scope split yet; profiles below are single-root analysis sets.)
 # ============================================================================
 
-[scope.core-specs]          # spec-topology's view today
-root = "core-protocol-domain/specs"
-exclude_dirs = ["deprecated", "archived"]
+# Post-split layout: every spec repo this tool serves keeps its normative
+# surface in `specs/` at the corpus root (entity-core-protocol: the V7 core +
+# the two rulebooks; entity-system-architecture: the same plus extensions/,
+# sdk/, applications/, domains/, with guides/ alongside). The pre-split roots
+# (`core-protocol-domain/specs`) named a directory that exists in neither.
+
+[scope.core-specs]          # spec-topology's view: the normative surface
+root = "specs"
+exclude_dirs = ["deprecated", "archived", "archive", "test-vectors"]
 exclude_files = []
 
-[scope.core-specs-strict]   # spec-standards' view today
-root = "core-protocol-domain/specs"
-exclude_dirs = ["deprecated", "archived", "reviews", "explorations",
-                "proposals", "__pycache__", ".git", "node_modules"]
+[scope.core-specs-strict]   # spec-standards' view: same, minus the rulebooks
+root = "specs"
+exclude_dirs = ["deprecated", "archived", "archive", "test-vectors", "reviews",
+                "explorations", "proposals", "__pycache__", ".git", "node_modules"]
 # The rulebooks quote their own counter-examples; never lint them.
 exclude_files = ["SPECIFICATION-FORMAT.md", "STYLE-NAMING-CONVENTIONS.md", "BACKLOG.md"]
 
 [scope.addressing-namespace]  # what citation targets RESOLVE against (wide)
-# Every real doc in the revision tree — so `address` can tell a TRUE dangling
-# (no file anywhere) from a citation into a doc that simply sits outside the
-# analysis scope (a proposal/exploration/guide). Resolution scope ⊋ analysis.
+# Every real doc in the corpus — so `address` can tell a TRUE dangling (no file
+# anywhere) from a citation into a doc that simply sits outside the analysis
+# scope (a proposal/exploration/guide). Resolution scope ⊋ analysis.
 root = "."
 exclude_dirs = ["deprecated", "archived", "archive", "__pycache__", ".git", "node_modules"]
 exclude_files = []
 
-[scope.naming-surface]      # spec-style's view today (the WHOLE v7 tree)
+[scope.naming-surface]      # spec-style's view: every doc with normative type-paths
+# Wider than `specs/` on purpose — the naming standard governs any doc carrying
+# normative type-paths, so guides/ and the root roadmaps are in. Intent and
+# ephemeral material is out: proposals and explorations are drafts by
+# definition, and dated status/handoff docs are snapshots that are immutable
+# once published (they cannot be corrected, so gating them is a permanent red).
 root = "."
 exclude_dirs = ["deprecated", "archived", "archive", "test-vectors",
-                "reviews", "proposals", "explorations"]
+                "reviews", "proposals", "explorations", "research", "status",
+                "__pycache__", ".git", "node_modules"]
 exclude_files = ["STYLE-NAMING-CONVENTIONS.md"]
-# DELTA(phase2): style roots at the whole revision tree; topology + standards
-# root at core-protocol-domain/specs. Reconcile to ONE corpus root + class-based
-# scoping (the naming rule governs every doc with normative type-paths, not just
-# specs/ — so the reconciled scope is wider than core-specs but excludes intent
-# and historical material, which classes express cleanly).
+# DELTA(phase2): naming-surface still roots wider than standards/topology. That
+# split is intentional (above) and no longer a pre-split accident; what remains
+# for phase 2 is expressing it through document CLASSES rather than dir names.
 
 
 # ============================================================================

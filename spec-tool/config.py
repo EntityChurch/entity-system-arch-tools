@@ -10,14 +10,44 @@ Stdlib-only. `tomllib` is stdlib since 3.11 (the containers pin python:3.12).
 """
 
 import fnmatch
+import os
 import tomllib
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
-# Filesystem repo root: tools/spec/config.py -> parents[2] == repo root.
-# (Matches the `REPO_ROOT = parents[2]` the old tools computed.)
-REPO_ROOT = Path(__file__).resolve().parents[2]
+# Where the TOOL lives (spec-tool/config.py -> parents[2] == this repo's root).
+# Pre-split this doubled as the corpus root, because tool and corpus shared one
+# repo. They no longer do: this repo carries no corpus (see AGENTS.md), so the
+# corpus root is resolved separately — see `corpus_root()`.
+TOOL_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = Path(__file__).resolve().parent / "config.default.toml"
+
+CORPUS_ENV = "SPEC_CORPUS"
+
+
+def corpus_root(explicit: Optional[Path] = None) -> Path:
+    """The corpus this run analyzes. Precedence: explicit > $SPEC_CORPUS > cwd.
+
+    **You point the tool at a corpus; the tool does not know where one is.**
+    Deriving it from the tool's own location was correct only while the tool
+    and the corpus shared a repo, and survived the split as a path to a
+    directory that exists in no checkout — which made both gates run over an
+    empty file set (`standards` reported PASS on zero files; `check` reported
+    `style=fail`, laundering *could not look* into *looked and failed*).
+    Defaulting to the working directory matches how the gate is actually
+    invoked: from inside the corpus, or with it bind-mounted at the workdir.
+    """
+    if explicit is not None:
+        return Path(explicit).resolve()
+    env = os.environ.get(CORPUS_ENV)
+    if env:
+        return Path(env).resolve()
+    return Path.cwd().resolve()
+
+
+# Backwards-compatible alias. Modules that anchor *display* paths (not
+# discovery) still import this; they should prefer `Config.repo_root`.
+REPO_ROOT = TOOL_ROOT
 
 
 def find_markdown(root: Path, exclude_dirs: Set[str], exclude_files: Set[str]) -> List[Path]:
@@ -56,10 +86,10 @@ class Scope:
 
 
 class Config:
-    def __init__(self, data: dict, repo_root: Path = REPO_ROOT):
+    def __init__(self, data: dict, repo_root: Optional[Path] = None):
         self._d = data
-        self.repo_root = repo_root
-        self.corpus_dir = repo_root / data["corpus"]["repo_root"]
+        self.repo_root = corpus_root() if repo_root is None else Path(repo_root).resolve()
+        self.corpus_dir = (self.repo_root / data["corpus"]["repo_root"]).resolve()
         voc = data.get("vocabulary", {})
         self.type_roots: Set[str] = set(voc.get("type_roots", []))
         self.doc_families: Set[str] = set(voc.get("doc_families", []))
@@ -100,7 +130,7 @@ class Config:
         return self.scope(self.analyzer(name)["scope"])
 
 
-def load(config_path: Optional[Path] = None, repo_root: Path = REPO_ROOT) -> Config:
+def load(config_path: Optional[Path] = None, repo_root: Optional[Path] = None) -> Config:
     path = config_path or DEFAULT_CONFIG
     with open(path, "rb") as f:
         data = tomllib.load(f)
