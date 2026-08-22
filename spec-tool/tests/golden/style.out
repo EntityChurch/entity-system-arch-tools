@@ -1,7 +1,7 @@
 ==========================================================================
 spec-style audit — split standard (kebab namespace / snake keys)
 ==========================================================================
-files scanned: 7   identifier hits: 33
+files scanned: 8   identifier hits: 36
 
 per-axis rule & result
   axis        rule             gated?  violations
@@ -16,9 +16,9 @@ landscape  (axis x separator, all hits)
   axis          snake   kebab   mixed  single   other
   type-path         1      10       1       4       0
   value             0       0       0       5       0
-  other-path        0       1       0       0       0
+  other-path        0       2       0       0       0
   pseudo-fn         1       0       0       0       0
-  bare              6       3       1       0       0
+  bare              6       5       1       0       0
 
 ADJUDICATION LIST: 2 distinct identifiers to fix (2 occurrences)
 (these are the real V8 rename targets under the split standard)

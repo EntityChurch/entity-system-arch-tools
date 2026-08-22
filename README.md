@@ -20,12 +20,39 @@ One functional core, commands as pathways into it:
 | `spec render <file>` | catalogs of one spec (reader) |
 | `spec topology` | corpus dependency graph (reader) |
 | `spec address` | §11 addressing validator |
-| `spec standards` | release-readiness / standards gate |
+| `spec standards` | release-readiness / standards gate (**baseline-ratcheted** — see below) |
 | `spec coherence` | internal-consistency gate — reads each spec against itself |
 | `spec style` | naming-convention gate |
 | `spec check` | run both gates (exits non-zero on violations) |
 
 Stdlib-only Python; the reader commands always exit 0, the gates exit non-zero on violations.
+
+### The standards baseline ratchet
+
+Five `standards` rules flag process narrative fossilized into normative text — which
+implementation built a thing, on what date, argued by whom. They are the difference between a
+spec and a lab notebook.
+
+All five were `warn` for months and were firing correctly the whole time: on the arch corpus,
+**573 findings across 26 of 40 specs, in runs that printed `✓ all gates passed`.** They are now
+`error`, with a ratchet so the promotion is survivable:
+
+```
+spec standards                  # known debt held; anything NEW is an error
+spec standards --init-baseline  # accept today's debt (one-time)
+spec standards --update-baseline  # lower the baseline; REFUSES to raise it
+spec standards --no-baseline    # the full un-ratcheted state
+```
+
+The baseline lives with the corpus it describes (`<corpus>/.spec-baseline.json`), not in this
+repo. `--update-baseline` may only ever lower a count and refuses atomically to raise one —
+without that asymmetry the next contaminated commit re-baselines itself green and the run looks
+clean.
+
+**Known blind spot:** entries are keyed `(file, rule) → count`, so a *swap* is invisible — remove
+one violation, add a different one in the same file, and the count is unchanged. Line numbers
+were rejected as a key because every edit above a finding moves it. This catches **accumulation,
+not substitution**; a reviewer still reads the diff.
 
 ## Usage
 

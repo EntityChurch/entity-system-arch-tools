@@ -1,4 +1,4 @@
-spec topology — 7 specs, 12 cross-spec edges  (root: ENTITY-CORE-PROTOCOL)
+spec topology — 8 specs, 12 cross-spec edges  (root: ENTITY-CORE-PROTOCOL)
 
 most depended-upon (in-degree):
   ENTITY-CORE-PROTOCOL                   cited by  5 specs,  10 refs

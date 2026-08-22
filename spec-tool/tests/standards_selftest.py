@@ -1,0 +1,374 @@
+#!/usr/bin/env python3
+"""standards_selftest — invariant checks for `hash-width-pin`, proposal-citation
+resolution, and the baseline ratchet.
+
+Like `address_selftest`, this pins *behavior* against synthetic fixtures rather
+than finding counts, so corpus corrections never make it stale.
+
+Why this rule has a self-test at all: §8.4.5 shipped as a corpus-wide
+prohibition enforced by a documented grep, in the same packet whose §5.2b
+concluded that a discipline is exactly what fails. A deliberate one-pass sweep
+by two parties then left nine survivors, two of them normative and one deriving
+an encryption key. The rule exists to move the invariant into the mechanism;
+this file is what keeps the rule honest.
+
+    python3 spec-tool/tests/standards_selftest.py    # exits non-zero on failure
+
+Stdlib-only. Third leg of tool verification, beside parity.sh + address_selftest.
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import standards  # noqa: E402
+
+FAKE = Path("MEM.md")
+FAILURES = []
+# Every case that ran, so the summary counts itself. It used to be a hardcoded
+# "48/48" and was already off by one before anyone noticed — a literal copy of a
+# number that changes every time a case is added is drift with a countdown on it.
+PASSED = []
+
+
+def widths(text):
+    """Return hash-width-pin findings for `text`."""
+    return [f for f in standards.analyze(FAKE, text) if f.rule == "hash-width-pin"]
+
+
+def case(name, text, want):
+    PASSED.append(name)
+    got = len(widths(text))
+    if got != want:
+        FAILURES.append(f"{name}: want {want} finding(s), got {got}")
+        print(f"  FAIL {name} (want {want}, got {got})")
+    else:
+        print(f"  ok   {name}")
+
+
+# --- it fires on the shapes that actually shipped ---------------------------
+# Each of these is a real defect found on 2026-08-10, reduced to one line.
+
+case("network_hex_width_pinned",
+     "- **Hash hex = 66, format-code included (MUST).** The content hash in the URL.", 1)
+
+case("encryption_hkdf_info_fixed",
+     "`recipient_pubkey_hash` is the **full 33-byte content_hash** — prefix + digest.", 1)
+
+case("relay_cddl_bstr_fixed",
+     "  envelope_inner:  <bstr, 33 bytes>      ; the content hash of the inner", 1)
+
+case("tree_link_fixed",
+     "  CBOR major type 2 (byte string) -> Link: 33-byte system/hash of a sub-node", 1)
+
+case("registry_bare_hash_fixed",
+     "are **bare `system/hash`** values (33 bytes, `0x00`+digest), NOT wrapped.", 1)
+
+case("hex33_is_a_lockin_by_name",
+     "The consumer fetches with `CONTENT_GET /content/{hex33(H)}` (§6.5.3 step 5).", 1)
+
+case("ffi_style_length_gate",
+     "Reject the request when `content_hash` hex len() != 66 (strict wire form).", 1)
+
+# --- fences are NOT a hiding place ------------------------------------------
+# Every instance the SHA-384 run could not reach was inside a CDDL or
+# pseudocode block, which is precisely where an implementer reads a width.
+case("fires_inside_a_code_fence",
+     "```\ncontent_hash: <33 bytes>   ; the entity hash\n```", 1)
+
+# --- it stays quiet where the text says why the width is safe ---------------
+
+case("exempt_when_length_follows_the_format_byte",
+     "The `content_hash` hex length follows its own format byte — never assumed.", 0)
+
+case("exempt_when_citing_the_rule",
+     "  envelope_inner: <bstr>   ; content hash, length per format byte (§8.4.5)", 0)
+
+case("exempt_worked_instance_guarded_by_format",
+     "`{peer_id_hex}` is lowercase hex of `system/hash`; under SHA-256 that is 66 chars.", 0)
+
+case("exempt_pinned_format_derive_to_meet",
+     "`prefix_hash` is pinned to the ECFv1-SHA-256 floor: 66 chars, on every peer.", 0)
+
+case("exempt_text_arguing_against_a_width",
+     "`system/hash` is variable-length per §1.2 — \"33 bytes\" is only today's size.", 0)
+
+case("exempt_historical_note_that_a_lockin_was_removed",
+     "**`hex33` removed** — it re-locked SHA-256; the system is encoding-agnostic.", 0)
+
+# The acknowledgement may sit a few lines away — CDDL comments wrap.
+case("exemption_reaches_across_nearby_lines",
+     "  envelope_inner:  <bstr>\n"
+     "     ; the content hash of the carried inner envelope, 33 B under SHA-256,\n"
+     "     ; its length following the format byte — never fixed (§8.4.5)", 0)
+
+case("exemption_does_not_reach_across_a_whole_section",
+     "The hash is a **33-byte content_hash** value.\n" + "\n" * 12 +
+     "Elsewhere: the length follows the format byte (§8.4.5).", 1)
+
+# --- it does not fire on widths that have nothing to do with hashes ---------
+
+case("quiet_on_unrelated_numbers",
+     "The bucket holds at most 33 entries and the bitmap is 66 bits wide.", 0)
+
+case("quiet_on_a_key_length",
+     "An Ed25519 public key is 32 bytes; a signature is 64 bytes.", 0)
+
+
+# --- proposal-citation resolution -------------------------------------------
+# Why this half exists: the editorial `proposal-citation` warn fired correctly on
+# a citation that pointed at nothing, for two months, and told nobody — because
+# it says "internal routing", not "this resolves to no file". A search then
+# concluded the document did not exist without opening the pre-split archive, and
+# four green conformance checks were proposed for retraction on that basis. These
+# cases pin the resolution behavior, and especially the three-valued part: the
+# tool must not call a name dangling when it was never given somewhere to look.
+
+import tempfile  # noqa: E402
+
+
+def rule_hits(text, rule):
+    return [f for f in standards.analyze(FAKE, text) if f.rule == rule]
+
+
+def rcase(name, text, rule, want):
+    PASSED.append(name)
+    got = len(rule_hits(text, rule))
+    if got != want:
+        FAILURES.append(f"{name}: want {want} {rule}, got {got}")
+        print(f"  FAIL {name} (want {want} {rule}, got {got})")
+    else:
+        print(f"  ok   {name}")
+
+
+ARCHIVE = tempfile.TemporaryDirectory()
+_ap = Path(ARCHIVE.name)
+(_ap / "PROPOSAL-CONVERGENT-MIRRORING.md").write_text("archived proposal\n")
+(_ap / "PROPOSAL-ROLE-V1.2.md").write_text("suffixed filename\n")
+(_ap / "PROPOSAL-STAGE-5-POSITIONS-cgid-10-214.md").write_text("stamped filename\n")
+
+CITE = "See `proposals/implemented/%s.md` for the derivation."
+
+# (1) No archive configured: unresolvable is a WARN, never an error. This is the
+#     honest-uncertainty case — absence of evidence is not evidence of absence.
+standards.set_proposal_archives([])
+rcase("no_archive__unknown_name_is_warn_not_error",
+      CITE % "PROPOSAL-DEFINITELY-NOT-A-REAL-DOCUMENT",
+      "proposal-citation-unresolved", 1)
+rcase("no_archive__never_errors",
+      CITE % "PROPOSAL-DEFINITELY-NOT-A-REAL-DOCUMENT",
+      "proposal-citation-dangling", 0)
+
+# (2) Archive configured: a name that resolves is silent on both new rules; a
+#     name that resolves nowhere is an ERROR, because now we did look.
+standards.set_proposal_archives([_ap])
+rcase("archived_name_resolves__no_dangling",
+      CITE % "PROPOSAL-CONVERGENT-MIRRORING", "proposal-citation-dangling", 0)
+rcase("archived_name_resolves__no_unresolved",
+      CITE % "PROPOSAL-CONVERGENT-MIRRORING", "proposal-citation-unresolved", 0)
+rcase("archive_configured__truly_absent_name_is_error",
+      CITE % "PROPOSAL-DEFINITELY-NOT-A-REAL-DOCUMENT",
+      "proposal-citation-dangling", 1)
+
+# (3) Prefix matching. Citations routinely drop a version suffix or a cgid stamp;
+#     16 of this corpus's 104 citations resolve only this way.
+rcase("citation_may_drop_a_version_suffix",
+      CITE % "PROPOSAL-ROLE-V1", "proposal-citation-dangling", 0)
+rcase("citation_may_drop_a_cgid_stamp",
+      CITE % "PROPOSAL-STAGE-5-POSITIONS", "proposal-citation-dangling", 0)
+
+# (4) The editorial warn is unchanged — this rule adds resolution, it does not
+#     replace the existing "not normative" signal.
+rcase("editorial_warn_still_fires_for_a_resolvable_name",
+      CITE % "PROPOSAL-CONVERGENT-MIRRORING", "proposal-citation", 1)
+
+# (5) `[PROPOSAL-FIRST]` is the lifecycle tag, not a filename. Reporting the
+#     corpus's own process vocabulary as a missing document is an error nobody
+#     can fix, which is how a gate trains its readers to ignore it.
+rcase("lifecycle_tag_is_not_a_citation",
+      "- `[PROPOSAL-FIRST]` **A4** — ingest-completeness guardrail (loud-reject).",
+      "proposal-citation-dangling", 0)
+
+# (6) A configured root that does not exist is could-not-look, not a verdict.
+standards.set_proposal_archives([_ap / "no-such-directory"])
+try:
+    standards.analyze(FAKE, CITE % "PROPOSAL-CONVERGENT-MIRRORING")
+    FAILURES.append("missing_archive_root_must_raise_CouldNotLook: no exception")
+    print("  FAIL missing_archive_root_must_raise_CouldNotLook")
+except standards.CouldNotLook:
+    print("  ok   missing_archive_root_must_raise_CouldNotLook")
+
+standards.set_proposal_archives([])
+
+
+# --- the baseline ratchet ---------------------------------------------------
+# Five rules were promoted warn → error. On the arch corpus that is 573 findings
+# across 26 of 40 specs, so severity ALONE would have turned the gate red on
+# contact and been switched off inside a day. The ratchet is what makes the
+# promotion survivable: known debt is held, new debt gates.
+#
+# Every invariant below is about the ASYMMETRY. A baseline that can be raised is
+# not a ratchet — the next contaminated commit re-baselines itself green and the
+# run looks clean, which is strictly worse than the warn it replaced.
+import tempfile as _tf  # noqa: E402
+
+B = standards.Baseline
+
+
+def r_case(name, ok):
+    PASSED.append(name)
+    if ok:
+        print(f"  ok   {name}")
+    else:
+        FAILURES.append(name)
+        print(f"  FAIL {name}")
+
+
+# (1) The promoted rules really are errors — pins against a silent demotion,
+#     since the whole mechanism rests on these gating.
+r_case("promoted_rules_are_errors",
+       all(standards.RULES[r][0] == "error" for r in standards.BASELINE_RULES))
+
+# (2) A baseline survives to_json → load with its counts intact.
+_b = B({("a.md", "date-in-body"): 3, ("b.md", "impl-team-ref"): 1})
+_p = Path(_tf.mkdtemp()) / "bl.json"
+_p.write_text(_b.to_json())
+r_case("baseline_round_trips", B.load(_p).counts == _b.counts)
+
+# (3)/(4) Within budget → held. Beyond budget → gates.
+_f = [standards.Finding("date-in-body", 10, "x"),
+      standards.Finding("date-in-body", 11, "y")]
+_rep = {"a.md": _f}
+_new, _known, _ = standards.apply_baseline(_rep, B({("a.md", "date-in-body"): 2}))
+r_case("within_baseline_does_not_gate", _new == {} and _known == 2)
+
+_new, _known, _ = standards.apply_baseline(_rep, B({("a.md", "date-in-body"): 1}))
+r_case("beyond_baseline_gates", len(_new.get("a.md", [])) == 1 and _known == 1)
+
+# (5) A file absent from the baseline is not silently exempt.
+_new, _known, _ = standards.apply_baseline(_rep, B({}))
+r_case("absent_file_is_all_new", len(_new.get("a.md", [])) == 2 and _known == 0)
+
+# (6) THE load-bearing one: the ratchet refuses to raise.
+_old = B({("a.md", "date-in-body"): 1})
+_r, _refused = standards.ratchet_baseline(_old, {("a.md", "date-in-body"): 5})
+r_case("ratchet_refuses_to_raise",
+       len(_refused) == 1 and _r.counts[("a.md", "date-in-body")] == 1)
+
+# (7) A wholly new file is refused, not absorbed.
+_r, _refused = standards.ratchet_baseline(_old, {("zz.md", "impl-team-ref"): 1})
+r_case("ratchet_refuses_new_file", len(_refused) == 1)
+
+# (8) It does lower when the debt was actually paid.
+_r, _refused = standards.ratchet_baseline(
+    B({("a.md", "date-in-body"): 4}), {("a.md", "date-in-body"): 1})
+r_case("ratchet_lowers_when_paid",
+       not _refused and _r.counts[("a.md", "date-in-body")] == 1)
+
+# (9) Paid debt is REPORTED as retired, never silently rewritten — an oracle
+#     that edits the file it is measured against has stopped being one.
+_new, _known, _retired = standards.apply_baseline({}, B({("a.md", "date-in-body"): 2}))
+r_case("paid_debt_reported_retired", _retired == {("a.md", "date-in-body"): 2})
+
+# (10) Only the five narrative rules are ratchetable; everything else gates
+#      whatever the baseline says.
+r_case("non_baseline_rule_unaffected",
+       "title-not-h1" not in standards.BASELINE_RULES
+       and standards.RULES["title-not-h1"][0] == "error")
+
+# (11) THE SPEC/WORKFLOW SPLIT. `specs/` holds two kinds of document. The
+#      normative specs are architecture's OUTPUT and must not name a repo or a
+#      date. The informative architecture docs and charters describe how the work
+#      is ORGANIZED, and naming the reference implementations there is their job.
+#      Same sentence, opposite verdicts — which is the whole point.
+_NARRATIVE = "> Ruled 2026-08-15 after `entity-core-go` routed it.\n"
+r_case("narrative_rules_score_a_normative_spec",
+       len([f for f in standards.analyze(Path("EXTENSION-GADGET.md"), _NARRATIVE)
+            if f.rule in standards.BASELINE_RULES]) > 0)
+r_case("narrative_rules_spare_an_arch_doc",
+       len([f for f in standards.analyze(Path("SYSTEM-ARCHITECTURE.md"), _NARRATIVE)
+            if f.rule in standards.BASELINE_RULES]) == 0)
+r_case("narrative_rules_spare_a_charter",
+       len([f for f in standards.analyze(Path("CHARTER.md"), _NARRATIVE)
+            if f.rule in standards.BASELINE_RULES]) == 0)
+# Structural rules are NOT class-scoped — an arch doc still owes a clean header.
+# Class drives disposition, not discovery.
+r_case("structural_rules_still_apply_to_an_arch_doc",
+       any(f.rule == "title-not-h1"
+           for f in standards.analyze(Path("SYSTEM-ARCHITECTURE.md"), _NARRATIVE)))
+
+# (12) THE BLIND SPOT, pinned deliberately rather than discovered later.
+#      Entries are keyed (file, rule) → count, so a SWAP is invisible: delete one
+#      violation, add a different one in the same file, and the gate stays green.
+#      That is the documented cost of not keying on line numbers, which move on
+#      every edit above a finding — a line-keyed baseline reports whole files as
+#      new debt on unrelated changes and gets deleted. This gate catches
+#      ACCUMULATION, not SUBSTITUTION. If this test ever fails the key shape
+#      changed, and the module docstring must change with it.
+_swapped = [standards.Finding("date-in-body", 99, "a different violation"),
+            standards.Finding("date-in-body", 100, "another one")]
+_new, _known, _ = standards.apply_baseline({"a.md": _swapped},
+                                           B({("a.md", "date-in-body"): 2}))
+r_case("known_blind_spot_swap_is_invisible", _new == {} and _known == 2)
+
+# (13) A FILE NOT READ IS NOT A FILE WITH NO DEBT.
+#      `--root ONE-FILE --update-baseline` used to lower every unscanned entry to
+#      zero — the ratchet only ever lowers, so no refusal fired and the run
+#      reported success while erasing the record it exists to keep. The same
+#      unscanned-reads-as-zero mistake made the report claim "80 entries
+#      over-count — debt was paid" after opening one file, and pointed the reader
+#      at the command that would act on it.
+_old = B({("a.md", "date-in-body"): 5, ("b.md", "date-in-body"): 7})
+_seen_partial = {("a.md", "date-in-body"): 2}          # only a.md was read
+_ratched, _refused = standards.ratchet_baseline(_old, _seen_partial, scanned={"a.md"})
+r_case("ratchet_carries_unscanned_entries_forward",
+       _ratched.counts[("b.md", "date-in-body")] == 7 and not _refused)
+r_case("ratchet_still_lowers_what_it_read",
+       _ratched.counts[("a.md", "date-in-body")] == 2)
+# Without the scanned set the old behaviour is reproduced exactly — this is the
+# injected fault, so the test above cannot pass vacuously.
+_wiped, _ = standards.ratchet_baseline(_old, _seen_partial)
+r_case("negative_control_unscoped_ratchet_would_wipe",
+       _wiped.counts[("b.md", "date-in-body")] == 0)
+# `retired` (the "debt was paid" report) is likewise scoped to what was read.
+_, _, _ret = standards.apply_baseline({"a.md": [standards.Finding("date-in-body", 1, "x")]},
+                                      _old, scanned={"a.md"})
+r_case("retired_ignores_unscanned_files",
+       list(_ret) == [("a.md", "date-in-body")])
+
+# (13) EVERY SEAT, NOT MOST SEATS. `impl-team-ref` carried an alternation that
+#      caught every implementation team except one: `entity-browser-rust` is
+#      neither an `entity-core-*` repo nor a one-word product name, so the two
+#      patterns that cover everyone else (`keystone`, `workbench`) both missed
+#      it — and a seat name reached normative spec text while the gate ran green.
+#      A rule blind to exactly one member of a known, enumerable set is worse
+#      than no rule, because its silence reads as a pass. The set is pinned here
+#      by enumeration: adding a repo to the polyrepo means adding it to this
+#      list and watching it fail first.
+def _team_hit(text):
+    return any(f.rule == "impl-team-ref"
+               for f in standards.analyze(Path("EXTENSION-GADGET.md"), text + "\n"))
+
+
+for _seat in ("entity-core-go", "entity-core-rust", "entity-core-py",
+              "entity-browser-rust", "entity-workbench-go", "entity-core-keystone"):
+    r_case("impl_team_ref_catches_" + _seat.replace("-", "_"),
+           _team_hit("Reported by `" + _seat + "` during the review."))
+
+# The bare form appears in prose as often as the repo name.
+r_case("impl_team_ref_catches_bare_browser_rust",
+       _team_hit("browser-rust raised this against §4.5.1."))
+
+# NEGATIVE CONTROLS — these keep the alternation from being widened into noise.
+# `Rust` is a language and appears legitimately in normative text; a rule that
+# flagged it would be re-baselined into irrelevance within a release.
+r_case("impl_team_ref_spares_the_language_rust",
+       not _team_hit("Implementations in Rust MUST preserve the received bytes."))
+r_case("impl_team_ref_spares_the_word_browser",
+       not _team_hit("A browser peer hands these to `RTCIceServer.urls` verbatim."))
+
+if FAILURES:
+    print(f"\n{len(FAILURES)} failure(s):")
+    for f in FAILURES:
+        print(f"  - {f}")
+    sys.exit(1)
+print(f"\n{len(PASSED)}/{len(PASSED)} invariants pass")

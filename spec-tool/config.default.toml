@@ -96,6 +96,10 @@ default = "canonical-spec"
 "SYSTEM-ARCHITECTURE.md"   = "arch-doc"
 "SYSTEM-IDENTITY-COMPOSITION.md" = "arch-doc"
 "ENTITY-SYSTEM-REFERENCE.md" = "arch-doc"
+# A domain CHARTER declares what a domain is for and which workstream owns it —
+# process, not protocol. It defaulted to canonical-spec, which scored its own
+# "Owning workstream" line as spec contamination.
+"CHARTER.md"               = "arch-doc"
 # SYSTEM-COMPOSITION stays canonical-spec (load-bearing, highly cited).
 
 

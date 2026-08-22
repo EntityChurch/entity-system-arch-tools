@@ -6,6 +6,13 @@ character remainder budget so the standards gate flags header-version-blob
 instead of accepting it as a bare version field for this document
 **Status**: Active
 
+This file is an `arch-doc` by class (`ARCHITECTURE-*`). Everything below is
+process narrative, and the standards gate is expected to stay SILENT on all of
+it — an architecture doc naming its implementations and its history is doing its
+job. The structural findings above (title, version blob) still fire, because
+class drives disposition, not discovery. `EXTENSION-NARRATIVE.md` carries the
+same shapes under a canonical-spec name, where they are errors.
+
 ## 1. Provenance
 
 This document folds in Amendment 1 and Amendment 2 of the example stack, which
