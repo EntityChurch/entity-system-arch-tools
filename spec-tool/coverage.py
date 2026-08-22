@@ -83,15 +83,36 @@ STATUS_RE = re.compile(r"^\*\*Status\*\*:?\s*(.+)$", re.M)
 # them as one sends people to write a document that already exists.
 PROPOSALNAME_RE = re.compile(r"\b(PROPOSAL-[A-Z0-9][A-Z0-9-]{2,})\b")
 
-# A document declaring itself informative rather than normative. Only two files
-# in the arch corpus carry this today and both invented the field, because
-# SPECIFICATION-FORMAT defines no document classes. Surfaced, not enforced:
-# an architecture/navigation doc legitimately has no proposal behind it and no
-# guide beside it — it IS the synthesis layer — so counting it as an
-# unsupported spec is a category error.
+# A document declaring itself informative rather than normative, IN ITS OWN TEXT.
+# This is the document's *self-declaration*, which is a different fact from the
+# corpus-level class assignment (`config.doc_class`, below) and is kept separate
+# on purpose: where the two disagree, that disagreement is the finding.
+#
+# Only two files in the arch corpus carry this today and both invented the field.
+# SPECIFICATION-FORMAT §11.3 *does* define the class concept — it names three
+# citation-target kinds (another normative spec · an architectural/guide document
+# · anything else) and §11.4 the dangling dispositions. What it does not give a
+# document is a way to DECLARE its own class in its header, which is why two
+# files invented `Authoritative scope:` rather than reaching for a standard field.
 INFORMATIVE_RE = re.compile(
     r"^\*\*Authoritative scope[^\n]*\b[Ii]nformative\b|^\*\*Status\*\*[^\n]*\b[Ii]nformative\b",
     re.M)
+
+# Classes that are NOT held to the "should have a guide / should have a design
+# record" expectation, because they are not canonical specs — they ARE the
+# support layer.
+#
+#   guide     a rulebook or how-to (SPECIFICATION-FORMAT, STYLE-NAMING-CONVENTIONS)
+#   arch-doc  a synthesis / navigation / orientation reference (ARCHITECTURE-*,
+#             ENTITY-SYSTEM-REFERENCE, a domain CHARTER)
+#
+# Holding these to the spec expectation is a category error, and it is the one
+# this analyzer made on its first run: it reported five "specs with no guide", of
+# which three were a rulebook, a working reference, and a domain charter — each
+# already classed non-spec in `config.default.toml`, by a map this file was not
+# reading while `address.py` was. Two class systems for one question is the exact
+# shape the toolkit exists to prevent.
+SUPPORT_CLASSES = ("guide", "arch-doc")
 
 
 class Doc:
@@ -172,7 +193,10 @@ def analyze(root: Path) -> Dict:
     for sp in specs:
         ver, status = _meta(sp.text)
         named = sorted(set(PROPOSALNAME_RE.findall(sp.text)))
+        cls = _CFG.doc_class(sp.stem)
         row: Dict = {"spec": sp.stem, "path": sp.rel, "version": ver, "status": status,
+                     "class": cls,
+                     "canonical": cls not in SUPPORT_CLASSES,
                      "informative": bool(INFORMATIVE_RE.search(sp.text)),
                      "names_absent_proposals": [n for n in named
                                                 if n not in proposal_stems]}
@@ -225,8 +249,8 @@ def render_text(res: Dict, gaps_only: bool) -> str:
     out.append("")
 
     if not gaps_only:
-        out.append("  %-42s %-7s %-8s %-6s %-5s %s"
-                   % ("spec", "ver", "status", "guide", "prop", "research"))
+        out.append("  %-42s %-7s %-8s %-9s %-6s %-5s %s"
+                   % ("spec", "ver", "status", "class", "guide", "prop", "research"))
         for r in rows:
             def mark(k: str) -> str:
                 hits = r[k]
@@ -234,26 +258,36 @@ def render_text(res: Dict, gaps_only: bool) -> str:
                     return "—"
                 sig = "".join(sorted({h["signal"] for h in hits}))
                 return "%d%s" % (len(hits), sig[:2])
-            out.append("  %-42s %-7s %-8s %-6s %-5s %s"
+            out.append("  %-42s %-7s %-8s %-9s %-6s %-5s %s"
                        % (r["spec"][:42], r["version"][:7], r["status"][:8],
+                          r["class"][:9],
                           mark("guide"), mark("proposal"), mark("research")))
         out.append("")
 
-    no_guide = [r["spec"] for r in rows if not r["guide"]]
-    _recordless = [r for r in rows if not r["proposal"] and not r["research"]]
+    # The gap lists run over CANONICAL SPECS ONLY. A guide or an arch-doc is not
+    # a spec missing its support layer; it IS the support layer.
+    canon = [r for r in rows if r["canonical"]]
+    support = [r for r in rows if not r["canonical"]]
+
+    no_guide = [r["spec"] for r in canon if not r["guide"]]
+    _recordless = [r for r in canon if not r["proposal"] and not r["research"]]
     no_record = [r["spec"] for r in _recordless
                  if not r["names_absent_proposals"]]
     record_elsewhere = [(r["spec"], ", ".join(r["names_absent_proposals"][:3]))
                         for r in _recordless if r["names_absent_proposals"]]
-    informative = [r["spec"] for r in rows if r["informative"]]
-    guide_no_cite = [r["spec"] for r in rows
+    # A document whose own text says "informative" while the corpus class map
+    # calls it a canonical spec. The two disagree; that disagreement is the
+    # finding, and it is what a header-declared class field would settle.
+    class_mismatch = [r["spec"] for r in canon if r["informative"]]
+    guide_no_cite = [r["spec"] for r in canon
                      if r["guide"] and all("c" not in h["signal"] for h in r["guide"])]
 
     out.append("gaps")
-    out.append("  specs with no guide (%d):" % len(no_guide))
+    out.append("  canonical specs with no guide (%d of %d canonical):"
+               % (len(no_guide), len(canon)))
     for s in no_guide:
         out.append("    %s" % s)
-    out.append("  specs with NO design record and naming none (%d):"
+    out.append("  canonical specs with NO design record and naming none (%d):"
                % len(no_record))
     for s in no_record:
         out.append("    %s" % s)
@@ -262,11 +296,17 @@ def render_text(res: Dict, gaps_only: bool) -> str:
                    % len(record_elsewhere))
         for s, p in record_elsewhere:
             out.append("    %-42s names %s" % (s, p))
-    if informative:
-        out.append("  self-declared INFORMATIVE — a synthesis/navigation doc legitimately has")
-        out.append("  no proposal behind it and no guide beside it; it IS that layer (%d):"
-                   % len(informative))
-        for s in informative:
+    if support:
+        out.append("  NOT canonical specs — the support layer itself, held to no")
+        out.append("  guide/record expectation (%d, class per config.default.toml):"
+                   % len(support))
+        for r in support:
+            out.append("    %-42s %s" % (r["spec"], r["class"]))
+    if class_mismatch:
+        out.append("  CLASS MISMATCH — the document's own text declares it informative")
+        out.append("  but the corpus class map calls it a canonical spec (%d):"
+                   % len(class_mismatch))
+        for s in class_mismatch:
             out.append("    %s" % s)
     if guide_no_cite:
         out.append("  guide matched by affinity but never names the spec (%d):"

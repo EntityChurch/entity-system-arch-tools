@@ -151,6 +151,45 @@ with tempfile.TemporaryDirectory() as tmp:
     ok("a normative spec is NOT flagged informative",
        g and g["informative"] is False)
 
+    print("document class — the support layer is not a spec missing its support")
+    # The first run of this analyzer reported five "specs with no guide", of
+    # which three were a rulebook, a working reference and a domain charter.
+    # Each was ALREADY classed non-spec in config.default.toml — by a map this
+    # analyzer was not reading while address.py was. These invariants are the
+    # enforcement point for that fix: they assert the class is consulted, and
+    # that the gap lists exclude the support layer.
+    ok("an ARCHITECTURE-* doc is classed arch-doc, not canonical-spec",
+       arch and arch["class"] == "arch-doc", arch and arch.get("class"))
+    ok("...and is therefore not canonical",
+       arch and arch["canonical"] is False)
+    ok("an EXTENSION-* spec IS canonical",
+       g and g["canonical"] is True and g["class"] == "canonical-spec",
+       g and g.get("class"))
+
+    base3 = fixture(Path(tmp) / "c", {
+        # a rulebook: classed `guide` by config, so it must NOT appear in the
+        # "specs with no guide" list — it is one.
+        "specs/STYLE-NAMING-CONVENTIONS.md": "**Version**: 1.0\n**Status**: Active\n",
+        # a domain charter: classed `arch-doc`.
+        "specs/applications/CHARTER.md": "**Version**: 1.0\n**Status**: Draft\n",
+        # a real spec with no guide anywhere — this one SHOULD be reported.
+        "specs/extensions/EXTENSION-EPSILON.md": "**Version**: 1.0\n**Status**: Active\n",
+    })
+    r3 = coverage.analyze(base3)
+    text3 = coverage.render_text(r3, True)
+    gap_block = text3.split("canonical specs with no guide")[1].split("canonical specs with NO")[0]
+    ok("a rulebook is NOT reported as a spec with no guide",
+       "STYLE-NAMING-CONVENTIONS" not in gap_block, gap_block)
+    ok("a domain charter is NOT reported as a spec with no guide",
+       "CHARTER" not in gap_block, gap_block)
+    ok("a genuine guide-less spec IS still reported — the gap is not papered over",
+       "EXTENSION-EPSILON" in gap_block, gap_block)
+    ok("the support layer is listed under its own heading with its class",
+       "the support layer itself" in text3 and "arch-doc" in text3)
+    ok("the canonical count in the heading excludes the support layer",
+       "no guide (1 of 1 canonical)" in text3,
+       text3.split("\n")[3] if len(text3.split("\n")) > 3 else text3)
+
     print("could-not-look is not a pass")
     empty = Path(tmp) / "empty"
     empty.mkdir()

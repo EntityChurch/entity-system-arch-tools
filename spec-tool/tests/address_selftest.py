@@ -226,6 +226,135 @@ def section_style_paragraph_heading_resolves():
     assert not [x for x in f if x.cls == "stale-section"], f
 
 
+# --- multi-root namespace resolution ----------------------------------------
+# Why these exist: `namespace` decides whether a citation to a document outside
+# the analysis scope resolves or is reported `dangling`. It was built from one
+# corpus root while this corpus spans two repos, so every citation to
+# ENTITY-CORE-PROTOCOL (495 of them), ENTITY-NATIVE-TYPE-SYSTEM (24), and
+# ENTITY-CBOR-ENCODING (4) reported as "target absent from corpus" — ~523 of 574
+# `dangling` findings were unreachable, not absent. That is could-not-look
+# rendered as a verdict, in the analyzer built to catch that, and it is why
+# `address` could not be gated. Measured after the fix: 574 -> 5.
+
+
+@case
+def extra_namespace_root_makes_a_sibling_doc_resolvable():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        (root / "ENTITY-CORE-PROTOCOL.md").write_text("# core\n")
+        ns = address.extra_namespace([root])
+        assert "ENTITY-CORE-PROTOCOL" in ns, ns
+
+
+@case
+def sibling_doc_no_longer_reports_dangling():
+    env = env_for(["EXTENSION-SUBSCRIPTION"], "canonical-spec",
+                  namespace={"EXTENSION-SUBSCRIPTION", "ENTITY-CORE-PROTOCOL"})
+    out = address._dispose_external("ENTITY-CORE-PROTOCOL", "5.5", "canonical-spec", env)
+    assert out is None, out
+
+
+@case
+def unreachable_sibling_doc_still_reports_dangling_without_the_root():
+    env = env_for(["EXTENSION-SUBSCRIPTION"], "canonical-spec",
+                  namespace={"EXTENSION-SUBSCRIPTION"})
+    out = address._dispose_external("ENTITY-CORE-PROTOCOL", "5.5", "canonical-spec", env)
+    assert out is not None and out[0] == "dangling", out
+
+
+@case
+def missing_namespace_root_is_could_not_look_not_a_verdict():
+    try:
+        address._namespace_roots([Path("/definitely/not/a/real/root")])
+    except address.CouldNotLook:
+        return
+    raise AssertionError("a configured-but-absent root must raise CouldNotLook, not resolve to empty")
+
+
+@case
+def no_namespace_root_configured_is_not_an_error():
+    assert address._namespace_roots([]) == [] or isinstance(address._namespace_roots([]), list)
+
+
+# ---------------------------------------------------------------------------
+# Analysis scope — WHOSE citations get graded.
+#
+# `address` rooted at `specs/` for its whole life, so all 34 guides were loaded
+# as citation TARGETS and graded as SOURCES by nothing. That asymmetry is
+# invisible from the output: a scope that is never read reports the same zero
+# findings as a scope that is clean. These invariants are the enforcement point
+# — they assert the published surface is the analysis set, and that the
+# agent-guidance files sharing its root stay out.
+# ---------------------------------------------------------------------------
+
+
+def _tree(base, files):
+    for rel, body in files.items():
+        p = Path(base) / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body, encoding="utf-8")
+    return Path(base)
+
+
+@case
+def analysis_scope_includes_guides_not_only_specs():
+    scope = CFG.scope("addressing-analysis")
+    assert scope.root.name != "specs", (
+        "the analysis root is still specs/ — guides would be graded by nothing")
+    assert "guides" not in scope.exclude_dirs, scope.exclude_dirs
+
+
+@case
+def analysis_scope_excludes_the_intent_workspace():
+    scope = CFG.scope("addressing-analysis")
+    for d in ("docs", "proposals", "research", "status"):
+        assert d in scope.exclude_dirs, (
+            "%r must stay out of the analysis set — drafts and immutable dated "
+            "snapshots cannot be corrected, so gating them is a permanent red" % d)
+
+
+@case
+def load_corpus_grades_a_guide_and_skips_agent_guidance():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        base = _tree(tmp, {
+            "specs/EXTENSION-ALPHA.md": "# a\n\n## 1. s\n",
+            "guides/GUIDE-ALPHA.md": "# g\n\n## 1. s\n",
+            "AGENTS.md": "# agents\n\n## 1. s\n",
+            "docs/proposals/PROPOSAL-X.md": "# p\n\n## 1. s\n",
+        })
+        scope = CFG.scope("addressing-analysis")
+        docs = address.load_corpus(base, set(scope.exclude_dirs),
+                                   set(scope.exclude_files))
+        assert "GUIDE-ALPHA" in docs, ("a guide must be an analysis SOURCE; "
+                                       "got %s" % sorted(docs))
+        assert "EXTENSION-ALPHA" in docs, sorted(docs)
+        assert "AGENTS" not in docs, ("agent guidance is not governed by §11 and "
+                                      "must not be graded; got %s" % sorted(docs))
+        assert "PROPOSAL-X" not in docs, sorted(docs)
+
+
+@case
+def a_guide_citing_an_absent_document_still_reports_dangling():
+    # The class that matters in a guide. §11.3 row 2 lets a guide cite intent
+    # artifacts as provenance, so those are NOT findings — but a citation to a
+    # document absent from the whole corpus is, and that is exactly what
+    # survived unseen in the networking guide's status board.
+    env = env_for(["EXTENSION-ALPHA"], "guide", namespace={"EXTENSION-ALPHA"})
+    out = address._dispose_external("PROPOSAL-NEVER-WRITTEN", "1.1", "guide", env)
+    assert out is not None and out[0] == "dangling", out
+
+
+@case
+def a_guide_citing_a_present_intent_artifact_is_permitted_provenance():
+    env = env_for(["EXTENSION-ALPHA"], "guide",
+                  namespace={"EXTENSION-ALPHA", "PROPOSAL-REAL"})
+    out = address._dispose_external("PROPOSAL-REAL", "1.1", "guide", env)
+    assert out is None, ("a guide citing a real proposal is informational "
+                         "provenance under §11.3, not a leak; got %r" % (out,))
+
+
 def main():
     failed = 0
     for fn in CASES:

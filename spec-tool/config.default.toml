@@ -143,6 +143,34 @@ root = "specs/test-vectors"
 exclude_dirs = ["deprecated", "archived", "archive", "__pycache__", ".git"]
 exclude_files = []
 
+[scope.addressing-analysis]   # whose OWN citations `address` grades
+# The published surface, which is `specs/` AND `guides/` — not `specs/` alone.
+#
+# `address` rooted at `specs/` for its whole life, so all 34 guides were graded
+# by nothing: they were loaded into `addressing-namespace` as citation TARGETS
+# (so a spec citing a guide resolved) and never scanned as citation SOURCES. The
+# asymmetry is invisible from the output — a scope that is never read reports the
+# same zero findings as a scope that is clean — and it is where a stale
+# networking status board and two dangling proposal citations survived.
+#
+# §11 governs the guides by its own terms: §11.3 row 2 makes an architectural /
+# guide document a legitimate citation target, and `_dispose_external` already
+# reads the SOURCE class, so a guide citing an intent artifact is permitted
+# provenance rather than a leak. What it still catches in a guide is the class
+# that matters there: a citation to a document absent from the whole corpus.
+#
+# Agent guidance, community-health files and the changelog share this root and
+# are excluded by name: they are neither spec nor guide, §11 does not govern
+# them, and grading them would bury the corpus findings in noise.
+root = "."
+exclude_dirs = ["deprecated", "archived", "archive", "test-vectors", "docs",
+                "reviews", "proposals", "explorations", "research", "status",
+                "__pycache__", ".git", ".github", "node_modules"]
+exclude_files = ["AGENTS.md", "AGENTS-STANDARD.md", "AGENTS.local.md",
+                 "CLAUDE.md", "CLAUDE.local.md", "METHODOLOGY.md", "README.md",
+                 "CHANGELOG.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md",
+                 "SECURITY.md", "GOVERNANCE.md", "SUPPORT.md"]
+
 [scope.addressing-namespace]  # what citation targets RESOLVE against (wide)
 # Every real doc in the corpus — so `address` can tell a TRUE dangling (no file
 # anywhere) from a citation into a doc that simply sits outside the analysis
@@ -196,6 +224,81 @@ impl-team-ref            = "warn"
 proposal-citation        = "warn"
 amendment-provenance     = "warn"
 hash-width-pin           = "error"
+
+# ============================================================================
+# PROVENANCE — `spec provenance`. The L1 gate: no normative spec edit without a
+# proposal. Reads CHANGES, not text, which is why it is its own analyzer and not
+# a standards rule: "was there a proposal for this edit?" is unanswerable from
+# the file alone.
+#
+# Severity is `warn` on purpose. Flipping to error retroactively fails against
+# the 34-commit backlog on contact and is off within a day; ratchet it once the
+# reconstruction ledger burns down. Same play as the five standards rules.
+# ============================================================================
+[analyzer.provenance]
+default_since = "HEAD~1"
+spec_prefix = "specs/"
+# State is the directory (INDEX.md §0), so proposal existence is a listing.
+proposal_dirs = ["docs/proposals"]
+
+# Declared, greppable exemptions. Both are arch's own standing rules, and both
+# must be CLAIMED in a commit trailer rather than inferred by the tool: an
+# exemption nobody can audit is not an exemption. Without `cohort-finding`,
+# trigger 2 fires on every in-place fix.
+#   Spec-Change: hygiene          wording-only; no normative change
+#   Spec-Change: cohort-finding   impl finding fixed in place, no rev bump
+carve_outs = ["hygiene", "cohort-finding"]
+
+[analyzer.provenance.rules]
+normative-edit-without-proposal = "warn"
+# A claimed exemption the gate does not recognise is a different fact from no
+# exemption at all, and is reported as its own rule rather than folded in.
+spec-change-trailer-unknown     = "warn"
+
+# ============================================================================
+# LEDGER — `spec ledger`. Declared counts in tracking docs vs the directories
+# they name. Not scope-based: it names DOCUMENTS, because what is checked is
+# one file's claim about its own siblings, not a surface to sweep.
+#
+# `docs/` sits outside every prose scope on purpose (proposals are drafts;
+# dated status docs are immutable snapshots that cannot be corrected).
+# An `INDEX.md` is the exception that proves it: it says of itself *"Update on
+# every state change"*, so an index is the one kind of document in `docs/`
+# whose drift is a defect rather than a fossil.
+#
+# `docs/research/INDEX.md` was added for the same reason `docs/proposals/`
+# has one. The design record — explorations and reviews — had a README
+# describing the *lifecycle* and nothing describing the *inventory*, so the
+# only way to answer "what have we already studied about X" was grep, and
+# grep finds only the words you already guessed. Work was repeatedly redone
+# because the document that had already done it could not be found. An index
+# without a gate becomes wrong within a cycle, so it gets this rung too.
+# ============================================================================
+[analyzer.ledger]
+# Resolved against the corpus root. A repo carrying none of these has nothing
+# to gate, which is reported as could-not-look (exit 2), never as a pass.
+# Listing a document a repo does not carry is safe: absent files are skipped,
+# and only a total absence of all of them is the could-not-look case.
+documents = ["docs/proposals/INDEX.md", "docs/research/INDEX.md"]
+
+[analyzer.ledger.rules]
+declared-count-mismatch = "error"
+# A declaration naming a directory that does not exist is the `unscanned reads
+# as zero` shape: rename the directory and the pattern stops matching, so the
+# count silently stops being guarded while the run stays green.
+declared-count-dangling = "error"
+
+# Heading-parenthetical abbreviations -> the subdirectory each stands for, as in
+# `## 1. Active — 25 files (ext 14 · app 5 · process 6 · core 0)`. Corpus
+# knowledge, so it lives here; an unrecognised token is skipped, never guessed.
+[analyzer.ledger.aliases]
+ext = "extensions"
+app = "applications"
+apps = "applications"
+extensions = "extensions"
+applications = "applications"
+process = "process"
+core = "core"
 
 [analyzer.corpus]
 scope = "test-vector-corpus"

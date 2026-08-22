@@ -42,6 +42,7 @@ read-only — it never edits a spec. Stdlib-only Python 3.11+.
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -121,11 +122,24 @@ def build_doc(stem: str, path: Path, text: Optional[str] = None) -> Doc:
     return d
 
 
-def load_corpus(root: Path, excludes: Set[str]) -> Dict[str, Doc]:
+def load_corpus(root: Path, excludes: Set[str],
+                exclude_files: Optional[Set[str]] = None) -> Dict[str, Doc]:
+    """The analysis set: every document whose OWN citations are graded.
+
+    `exclude_files` matters once the analysis root widens past `specs/`. The
+    published surface (`specs/` + `guides/` + the roadmaps) sits beside agent
+    guidance (`AGENTS*.md`, `CLAUDE.md`, `METHODOLOGY.md`) and community-health
+    files at the same root, and those are neither spec nor guide — grading their
+    prose against §11 would bury the corpus findings in noise from documents the
+    addressing standard does not govern.
+    """
+    ex_files = exclude_files or set()
     docs: Dict[str, Doc] = {}
     for p in sorted(root.rglob("*.md")):
         rel = p.relative_to(root).parts
         if any(seg in excludes for seg in rel[:-1]):
+            continue
+        if p.name in ex_files:
             continue
         if p.stem in docs:
             continue
@@ -402,8 +416,57 @@ def batch_key(f: Finding, mode: str) -> str:
 
 
 # ---- run --------------------------------------------------------------------
-def collect(root: Path, excludes: Set[str]) -> Tuple[List[Finding], Dict[str, Doc]]:
-    docs = load_corpus(root, excludes)
+
+# ---- extra namespace roots -------------------------------------------------
+# `namespace` is how a citation to a document outside the analysis scope is
+# resolved (`_dispose_external`). It is built from the `addressing-namespace`
+# scope, which lives under ONE corpus root — and this corpus does not.
+# `entity-system-architecture` cites `ENTITY-CORE-PROTOCOL` constantly, and that
+# document is in the `entity-core-protocol` repo, so every such citation
+# resolved to "target absent from corpus": 495 of the 574 `dangling` findings on
+# the arch corpus, plus 24 `ENTITY-NATIVE-TYPE-SYSTEM` and 4
+# `ENTITY-CBOR-ENCODING`. ~523 of 574 were not dangling — they were unreachable.
+#
+# That is could-not-look reported as a verdict, inside the analyzer built to
+# catch exactly that, and it is why `address` cannot be wired into `check`: it
+# would fire ~523 false errors. Same defect `standards` had before the
+# proposal-citation work; same fix, applied a second time.
+#
+# Roots are operator-supplied — the sibling corpus is a separate checkout and
+# per AGENTS-STANDARD local paths are not committed:
+#
+#   spec address --namespace-root ../entity-core-protocol/specs
+#   SPEC_NAMESPACE_ROOTS=/path/one:/path/two spec address
+NAMESPACE_ROOTS_ENV = "SPEC_NAMESPACE_ROOTS"
+
+
+class CouldNotLook(Exception):
+    """A configured namespace root does not exist — exit 2, never a verdict."""
+
+
+def _namespace_roots(explicit) -> List[Path]:
+    roots = [Path(p).expanduser() for p in (explicit or [])]
+    if not roots:
+        raw = os.environ.get(NAMESPACE_ROOTS_ENV, "").strip()
+        if raw:
+            roots = [Path(p).expanduser() for p in raw.split(os.pathsep) if p.strip()]
+    for r in roots:
+        if not r.exists():
+            raise CouldNotLook("namespace root does not exist: %s" % r)
+    return roots
+
+
+def extra_namespace(roots: List[Path]) -> Set[str]:
+    """Document stems reachable from operator-supplied roots."""
+    out: Set[str] = set()
+    for r in roots:
+        out.update(p.stem for p in r.rglob("*.md"))
+    return out
+
+
+def collect(root: Path, excludes: Set[str], extra_ns: Optional[Set[str]] = None,
+            exclude_files: Optional[Set[str]] = None) -> Tuple[List[Finding], Dict[str, Doc]]:
+    docs = load_corpus(root, excludes, exclude_files)
     stems = set(docs)
     prefixes = {s.split("-")[0] for s in stems}
     families = _CFG.doc_families
@@ -414,6 +477,8 @@ def collect(root: Path, excludes: Set[str]) -> Tuple[List[Finding], Dict[str, Do
         nick_re = re.compile(r"\b(" + "|".join(re.escape(k) for k in keys) + r")\b",
                              re.IGNORECASE)
     namespace = {p.stem for p in _CFG.scope("addressing-namespace").find_markdown()}
+    if extra_ns:
+        namespace = namespace | extra_ns
     env = {
         "nick_re": nick_re, "nick_map": nick_map, "stems": stems,
         "prefixes": prefixes, "families": families,
@@ -469,8 +534,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("root", type=Path, nargs="?",
-                    default=_CFG.scope("core-specs").root,
-                    help="corpus root dir (default: v7.0 core specs)")
+                    default=_CFG.scope("addressing-analysis").root,
+                    help="corpus root dir (default: the published surface — "
+                         "specs/ AND guides/ plus the roadmaps)")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--worklist", type=Path, help="emit finding packets as JSONL to this path")
     ap.add_argument("--batch-by", default=None,
@@ -478,14 +544,34 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--gate", action="store_true",
                     help="exit non-zero if any §11 deviation exists")
     ap.add_argument("--exclude", action="append",
-                    default=sorted(_CFG.scope("core-specs").exclude_dirs))
+                    default=sorted(_CFG.scope("addressing-analysis").exclude_dirs))
+    ap.add_argument("--exclude-file", action="append", metavar="NAME",
+                    default=sorted(_CFG.scope("addressing-analysis").exclude_files),
+                    help="filename to skip as an analysis SOURCE (repeatable). "
+                         "Agent guidance and community-health files share the "
+                         "corpus root and are not governed by §11.")
+    ap.add_argument("--namespace-root", action="append", type=Path, metavar="PATH",
+                    help="additional root whose documents count as resolvable citation "
+                         "targets (repeatable; also $%s, %s-separated). This corpus spans "
+                         "two repos; without it, every citation to a sibling-repo document "
+                         "reports as dangling — which is could-not-look wearing a verdict's "
+                         "clothes." % (NAMESPACE_ROOTS_ENV, os.pathsep))
     args = ap.parse_args(argv)
 
     if not args.root.is_dir():
         print("not a directory: %s" % args.root, file=sys.stderr)
         return 2
 
-    findings, docs = collect(args.root, set(args.exclude))
+    try:
+        ns_roots = _namespace_roots(args.namespace_root)
+    except CouldNotLook as exc:
+        print("could not look: %s" % exc, file=sys.stderr)
+        print("  citations were NOT resolved against it — this is neither a pass nor a"
+              " deviation report.", file=sys.stderr)
+        return 2
+
+    findings, docs = collect(args.root, set(args.exclude), extra_namespace(ns_roots),
+                             set(args.exclude_file))
 
     if args.worklist:
         emit_worklist(findings, docs, args.worklist, args.batch_by)
