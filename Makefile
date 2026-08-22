@@ -54,6 +54,7 @@ help:
 	@echo "  topology        corpus dependency graph"
 	@echo "  config          print the resolved config"
 	@echo "meta:"
+	@echo "  sdksync         SDK restatements vs the extension spans they copied"
 	@echo "  parity          unified CLI == golden fixtures (regression oracle)"
 	@echo "  compile         byte-compile the spec package (sanity)"
 	@echo "ADR-0019 Tier-1 (over the tool's own code, stdlib-only):"
@@ -97,12 +98,19 @@ corpus:
 ledger:
 	@$(PYTHON) $(CLI) --corpus $(CORPUS) ledger
 
+
 # Pass SINCE=<ref> to widen the range -- and ALWAYS quote the range with the
 # number: a provenance count without its window is a conformance number without
 # its oracle pin. The gate prints `scanned N commit(s) since REF` for that
 # reason; carry both or carry neither.
 provenance:
 	@$(PYTHON) $(CLI) --corpus $(CORPUS) provenance --since $(SINCE)
+
+# Gates staleness, not correctness: a pin says the source span is byte-identical
+# to when someone last reviewed this restatement against it. Unpinned blocks are
+# a visible backlog and deliberately do not gate.
+sdksync:
+	@$(PYTHON) $(CLI) --corpus $(CORPUS) sdksync
 
 # Reader, not a gate: measures how much each spec is still moving, and prints
 # the spec -> core-reference-peers -> generators -> community pipeline with the
@@ -158,8 +166,10 @@ test: compile parity
 	@$(PYTHON) spec-tool/tests/coherence_selftest.py
 	@$(PYTHON) spec-tool/tests/corpus_selftest.py
 	@$(PYTHON) spec-tool/tests/convergence_selftest.py
+	@$(PYTHON) spec-tool/tests/coverage_selftest.py
 	@$(PYTHON) spec-tool/tests/ledger_selftest.py
 	@$(PYTHON) spec-tool/tests/provenance_selftest.py
+	@$(PYTHON) spec-tool/tests/sdksync_selftest.py
 
 lint: compile
 

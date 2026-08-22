@@ -9,6 +9,7 @@ that reads the one shared model (`model.py`) and the one config
     spec tree <file> [--symbols|--refs|--json|--level N]   structural tree (reader)
     spec render <file> [--what …|--format …|--output …]    catalogs (reader)
     spec topology [ROOT] [--json|--dot]                    corpus graph (reader)
+    spec coverage [ROOT] [--gaps|--json]                   spec -> guide/proposal/research (reader)
     spec address [ROOT] [--worklist …|--gate|--json]       §11 addressing validator
     spec standards [--root …|--refine|--json]              release-readiness gate
     spec style [--root …|--all|--json|--config …]          naming gate
@@ -16,6 +17,7 @@ that reads the one shared model (`model.py`) and the one config
     spec corpus [--root …|--vendor …|--json]               test-vector artifact gate
     spec convergence [--window N|--json]                   spec rate-of-change + pipeline
     spec ledger [--root …|--json]                          declared counts vs the directories
+    spec sdksync [--root …|--json|--unpinned|--update]      SDK restatements vs their sources
     spec provenance [--since REF|--json]                   L1: normative spec edit needs a proposal
     spec check                                             run all three gates (style + standards + coherence)
     spec config [CONFIG.toml]                              print the resolved config
@@ -57,7 +59,9 @@ import address
 import coherence
 import convergence
 import corpus
+import coverage
 import ledger
+import sdksync
 import provenance
 import model
 import render
@@ -78,7 +82,9 @@ DELEGATES = {
     "style": style.main,
     "corpus": corpus.main,
     "convergence": convergence.main,
+    "coverage": coverage.main,
     "ledger": ledger.main,
+    "sdksync": sdksync.main,
     "provenance": provenance.main,
 }
 
