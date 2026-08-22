@@ -2,7 +2,7 @@
 
 **The publishable spec toolkit.** A single CLI that reads, analyzes, and gates the Entity
 specification corpus — structural trees, catalogs, the corpus dependency graph, the §11
-addressing validator, and the release-readiness gates (naming + standards). It ships as its own
+addressing validator, and the corpus gates (naming + standards + internal coherence). It ships as its own
 repo, decoupled from any spec version, so the spec repos and the tool that lints them evolve
 independently.
 
@@ -21,6 +21,7 @@ One functional core, commands as pathways into it:
 | `spec topology` | corpus dependency graph (reader) |
 | `spec address` | §11 addressing validator |
 | `spec standards` | release-readiness / standards gate |
+| `spec coherence` | internal-consistency gate — reads each spec against itself |
 | `spec style` | naming-convention gate |
 | `spec check` | run both gates (exits non-zero on violations) |
 

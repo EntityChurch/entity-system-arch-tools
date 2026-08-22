@@ -128,6 +128,17 @@ exclude_dirs = ["deprecated", "archived", "archive", "test-vectors", "reviews",
 # The rulebooks quote their own counter-examples; never lint them.
 exclude_files = ["SPECIFICATION-FORMAT.md", "STYLE-NAMING-CONVENTIONS.md", "BACKLOG.md"]
 
+[scope.test-vector-corpus]  # spec-corpus's view: the ARTIFACTS, not the prose
+# The one scope that reaches INTO test-vectors. Every other scope excludes it,
+# which is why the corpus was not merely unlinted but UNREACHABLE: a
+# version-stamped directory name, a seven-week SEEDS.md gap, and a `.diag`
+# carrying 58-byte Ed448 seeds beside a correct `.cbor` all sat outside every
+# analyzer by construction. The prose scopes still exclude it, and should — a
+# `.diag` is not a spec and must not be graded as one.
+root = "specs/test-vectors"
+exclude_dirs = ["deprecated", "archived", "archive", "__pycache__", ".git"]
+exclude_files = []
+
 [scope.addressing-namespace]  # what citation targets RESOLVE against (wide)
 # Every real doc in the corpus — so `address` can tell a TRUE dangling (no file
 # anywhere) from a citation into a doc that simply sits outside the analysis
@@ -180,6 +191,113 @@ date-in-body             = "warn"
 impl-team-ref            = "warn"
 proposal-citation        = "warn"
 amendment-provenance     = "warn"
+hash-width-pin           = "error"
+
+[analyzer.corpus]
+scope = "test-vector-corpus"
+# The corpus gate. Its rules are the mechanism for defects that were each found
+# by an implementation, never by review, and each recorded in the corpus's own
+# SEEDS.md as owed: *"worth a build-time assertion rather than a reader's
+# diligence"* (the F16 width sweep) and *"if the two `.cbor` shas ever differ
+# after this, that is the defect, and it is worth a check"* (the two-copy
+# invariant). This is that assertion and that check.
+#
+# NOTE (TOML): scalars first, sub-tables last. Every key after a
+# `[analyzer.corpus.<sub>}` header belongs to that sub-table, not to this one.
+
+# Placeholder text that must never survive into an artifact. F16: the corpus
+# sha-locked and was declared Phase-2 LOCKED over twelve of the first one.
+placeholders = ["TBD-COHORT-ROUND-TRIP", "TBD-", "PENDING", "FIXME", "XXX-"]
+
+# Nouns a corpus directory and its artifacts must agree on. Catches an artifact
+# filed under the wrong corpus: `v767/conformance-vectors-v1.*` is the AGILITY
+# corpus wearing the CONFORMANCE corpus's filename, two directories from the
+# real `ecf-conformance/conformance-vectors-v1.*`.
+corpus_words = ["agility", "conformance", "type-registry", "compute"]
+
+# Below this, a repeated byte is ordinary data rather than a fixture. The
+# fixtures guarded here are 32/57/64 bytes wide.
+min_fixture_run = 8
+
+[analyzer.corpus.rules]
+corpus-version-stamp   = "error"
+corpus-name-mismatch   = "error"
+corpus-pair-incomplete = "error"
+corpus-placeholder     = "error"
+corpus-fixture-width   = "error"
+corpus-pair-disagree   = "error"
+vendor-drift           = "error"
+vendor-ambiguous       = "error"
+vendor-unmatched       = "warn"
+
+# Declared fixture widths: fill byte -> bytes. These are `agility-SEEDS.md` §2's
+# own declarations, moved out of prose and into the mechanism. Ed448 secret
+# seeds are 57 per RFC 8032 §5.2 (`0x42`, `0x46`); Ed25519 seeds are 32
+# (`0x43`/`0x44`/`0x45`/`0x47`); the `experimental-test` fixture public key is
+# `0xAA` × 64 per v7.66 §4.2. Six literals across the two `.diag` files carried
+# 58/58/63 for seven weeks while both `.cbor` artifacts carried 57/57/64.
+[analyzer.corpus.fixture_widths]
+0x42 = 57
+0x43 = 32
+0x44 = 32
+0x45 = 32
+0x46 = 57
+0x47 = 32
+0xAA = 64
+
+# --- [analyzer.corpus] scalars live ABOVE its sub-tables; see the NOTE there --
+
+# ============================================================================
+# MATURITY / CONVERGENCE  —  `spec convergence`
+#
+# The pipeline is this project's standard sequence: a spec lands, the core
+# reference peers implement it, the generators produce peers from it, and
+# eventually something outside the project uses it. Arch measures the FIRST
+# stage and only the first stage. Every later stage is owned by the repo that
+# does the work, reports its own state, and is aggregated here — never asserted
+# here. That split is why `source` is a path a repo publishes rather than
+# something this tool computes.
+#
+# Stages are DATA so the sequence can grow (a second generator, a new language
+# family, a community register) without a code change. A stage with no source
+# reports `unreported`, which is deliberately different from being absent: the
+# column stays visible so the hole is legible.
+# ============================================================================
+
+[maturity]
+scope = "naming-surface"   # what counts as "a spec" for rate-of-change purposes
+window_days = 90           # commit-count window
+active_days = 14           # changed within this -> volatile
+settle_days = 60           # unchanged beyond this -> settling
+
+# The trajectory flag the canonical maturity doc sets by hand. Derived here from
+# the commit dates instead, because a hand-set flag is one more number that goes
+# stale silently — the defect the whole maturity proposal is about.
+
+[[maturity.stages]]
+name = "spec"
+owner = "architecture"
+# measured here, from git
+
+[[maturity.stages]]
+name = "core-reference-peers"
+owner = "entity-core-{go,rust,py}"
+# source = "…"  # a convergence report each impl publishes; none yet
+
+[[maturity.stages]]
+name = "generators"
+owner = "entity-core-keystone (+ the system generator, not live)"
+# source = "…"  # the generated-peer census; keystone publishes per-peer reports
+                # today but in no agreed shape — see the oracle-contract §4
+                # verdict-document work, which this depends on.
+
+[[maturity.stages]]
+name = "community"
+owner = "outside this project"
+# source = "…"  # NOT "an implementation exists" — specs confirmed in USAGE.
+                # Currently zero, and published as zero rather than omitted:
+                # a cohort all passing one author's vectors is cohort-consistent,
+                # not independent convergence (AGENTS-STANDARD).
 
 [analyzer.style]
 scope = "naming-surface"

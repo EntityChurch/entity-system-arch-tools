@@ -12,16 +12,27 @@ that reads the one shared model (`model.py`) and the one config
     spec address [ROOT] [--worklist …|--gate|--json]       §11 addressing validator
     spec standards [--root …|--refine|--json]              release-readiness gate
     spec style [--root …|--all|--json|--config …]          naming gate
-    spec check                                             run both gates (style + standards)
+    spec coherence [--root …|--json]                       internal-consistency gate
+    spec corpus [--root …|--vendor …|--json]               test-vector artifact gate
+    spec convergence [--window N|--json]                   spec rate-of-change + pipeline
+    spec check                                             run all three gates (style + standards + coherence)
     spec config [CONFIG.toml]                              print the resolved config
 
 Any invocation may lead with `--corpus PATH` to name the corpus to analyze
 (equivalently `$SPEC_CORPUS`; default: the working directory). This repo ships
 no corpus — you always point the tool at one.
 
-Gates (`standards`, `style`, `check`) exit **1** on violations and **2** when
-they could not look (empty corpus / bad root); readers always exit 0. Those two
-are not the same result and are not reported as the same result.
+Gates (`standards`, `style`, `corpus`, `check`) exit **1** on violations and **2**
+when they could not look (empty corpus / bad root); readers always exit 0. Those
+two are not the same result and are not reported as the same result.
+
+`corpus` is deliberately NOT part of `check`. `check` is the two prose gates, run
+against every spec repo; `corpus` gates binary artifacts and only
+`entity-core-protocol` has any. Folding it in would either force `check` to
+report could-not-look on a prose repo, or teach it to shrug at an absent scope —
+and a gate that learns to shrug is the failure mode this toolkit was built
+against. It joins `check` when the corpus is de-versioned to one tree and every
+spec repo can answer for it.
 
 Stdlib-only Python 3.11+. Run as `python3 tools/spec/cli.py <subcommand> …`.
 """
@@ -41,6 +52,9 @@ if len(sys.argv) > 2 and sys.argv[1] == "--corpus":
     os.environ[_config.CORPUS_ENV] = sys.argv[2]
 
 import address
+import coherence
+import convergence
+import corpus
 import model
 import render
 import standards
@@ -56,20 +70,31 @@ DELEGATES = {
     "topology": topology.main,
     "address": address.main,
     "standards": standards.main,
+    "coherence": coherence.main,
     "style": style.main,
+    "corpus": corpus.main,
+    "convergence": convergence.main,
 }
 
 
 def cmd_check(argv):
-    """Run both corpus gates (style + standards), like `make check`.
+    """Run the three corpus gates (style + standards + coherence), like `make check`.
 
-    Non-zero exit if either gate reports violations. Output is each gate's own
+    Non-zero exit if any gate reports violations. Output is each gate's own
     report, in order, separated by a banner — a convenience over running the
-    two subcommands by hand; the per-gate output is byte-identical to running
-    them individually.
+    subcommands by hand; the per-gate output is byte-identical to running them
+    individually.
+
+    `coherence` joined on 2026-08-14. `style` reads a spec's names and
+    `standards` reads its shape; neither reads a spec against *itself*, which
+    is where the expensive defects were living — a `MUST` naming a helper the
+    corpus never defines, a value emitted for a field whose declared
+    enumeration omits it. Both families shipped, passed prose review, and were
+    found by an implementer building the section, after the divergence had been
+    routed at an innocent peer.
 
     Exit codes are three-valued, and the distinction is load-bearing:
-    0 = both gates looked and found nothing; 1 = a gate found violations;
+    0 = every gate looked and found nothing; 1 = a gate found violations;
     2 = a gate could not look (empty corpus). Collapsing 2 into "fail" is how
     a stale corpus root read as a lint failure for a year — the report named
     the wrong defect, so nobody went looking for the right one."""
@@ -80,22 +105,26 @@ def cmd_check(argv):
     rc_style = style.main([])
     print("\n=== spec standards ===")
     rc_standards = standards.main([])
+    print("\n=== spec coherence ===")
+    rc_coherence = coherence.main([])
 
     def verdict(rc):
         return "could-not-look" if rc == 2 else ("fail" if rc else "pass")
 
-    if 2 in (rc_style, rc_standards):
-        print("\n✗ a gate could not look — style=%s standards=%s"
-              % (verdict(rc_style), verdict(rc_standards)))
+    rcs = (rc_style, rc_standards, rc_coherence)
+    summary = ("style=%s standards=%s coherence=%s"
+               % (verdict(rc_style), verdict(rc_standards), verdict(rc_coherence)))
+
+    if 2 in rcs:
+        print("\n✗ a gate could not look — %s" % summary)
         print("  This is NOT a lint failure: a gate scanned zero files. Fix the corpus")
         print("  root (`spec --corpus PATH check`, $SPEC_CORPUS, or run from the corpus)")
-        print("  and re-run before reading anything into either result.")
+        print("  and re-run before reading anything into any of the results.")
         return 2
 
-    rc = 1 if (rc_style or rc_standards) else 0
-    print("\n%s — style=%s standards=%s"
-          % ("✓ both gates passed" if rc == 0 else "✗ a gate failed",
-             verdict(rc_style), verdict(rc_standards)))
+    rc = 1 if any(rcs) else 0
+    print("\n%s — %s"
+          % ("✓ all gates passed" if rc == 0 else "✗ a gate failed", summary))
     return rc
 
 
