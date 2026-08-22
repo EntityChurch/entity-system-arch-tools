@@ -9,6 +9,8 @@
 #   make check-podman CORPUS=… run both gates hermetically (one container)
 #   make style CORPUS=<path>   naming gate only
 #   make standards CORPUS=…    release-readiness gate only
+#   make corpus CORPUS=…       test-vector artifact gate (VENDOR=… to diff a copy)
+#   make convergence CORPUS=…  spec rate-of-change + the pipeline (reader)
 #   make tree SPEC=<spec.md>   structural tree of one spec
 #   make render SPEC=<spec.md> all catalogs of one spec
 #   make topology              corpus dependency graph
@@ -17,6 +19,7 @@
 
 PYTHON ?= python3
 SPEC   ?=
+VENDOR ?=
 IMAGE  ?= entity-spec:latest
 CLI    := spec-tool/cli.py
 
@@ -26,8 +29,11 @@ CLI    := spec-tool/cli.py
 # fails loudly with "could not look" rather than silently scanning nothing.
 REPO   := $(CURDIR)
 CORPUS ?= $(CURDIR)
+# Base ref for `provenance`. Generic on purpose: the backlog window is CORPUS
+# knowledge, not tool knowledge -- arch records its own in DISCIPLINE-CHARTER.
+SINCE  ?= HEAD~1
 
-.PHONY: help check check-podman style standards tree render topology config \
+.PHONY: help check check-podman style standards corpus convergence tree render topology config \
         parity compile build clean test lint fmt
 
 help:
@@ -38,7 +44,11 @@ help:
 	@echo "  check-podman    same, hermetic (one container)"
 	@echo "  style           naming gate only"
 	@echo "  standards       release-readiness gate only"
+	@echo "  corpus          test-vector artifact gate (VENDOR=<path> diffs a vendored copy)"
+	@echo "  ledger          declared counts in INDEX.md vs the directories they name"
+	@echo "  provenance      L1: a normative spec edit must name a proposal (SINCE=<ref>)"
 	@echo "readers (informational):"
+	@echo "  convergence     spec rate-of-change + the spec->peers->generators pipeline"
 	@echo "  tree SPEC=…     structural node tree"
 	@echo "  render SPEC=…   every catalog (--what all)"
 	@echo "  topology        corpus dependency graph"
@@ -64,6 +74,42 @@ style:
 
 standards:
 	@$(PYTHON) $(CLI) --corpus $(CORPUS) standards
+
+# The internal-consistency gate: reads each spec against itself (a MUST naming
+# an undefined referent; a value emitted for a field its declared enumeration
+# omits). Part of `check` — unlike `corpus`, it gates prose and every spec repo
+# has prose.
+coherence:
+	@$(PYTHON) $(CLI) --corpus $(CORPUS) coherence
+
+# The artifact gate. Deliberately NOT part of `check` — see cli.py's docstring:
+# `check` is the two prose gates and runs against every spec repo, while only
+# entity-core-protocol carries test-vectors. VENDOR=<path> additionally gates a
+# vendored copy in another tree and diffs it against the source; that read is
+# read-only, because a vendor lives in another team's repo and drift there
+# routes, it does not get edited from here.
+corpus:
+	@$(PYTHON) $(CLI) --corpus $(CORPUS) corpus $(if $(VENDOR),--vendor $(VENDOR),)
+
+# Gates, but NOT part of `check` — each would force `check` to report
+# could-not-look on a repo that legitimately has neither surface, and a gate
+# that learns to shrug is the failure mode this toolkit was built against.
+ledger:
+	@$(PYTHON) $(CLI) --corpus $(CORPUS) ledger
+
+
+# Pass SINCE=<ref> to widen the range -- and ALWAYS quote the range with the
+# number: a provenance count without its window is a conformance number without
+# its oracle pin. The gate prints `scanned N commit(s) since REF` for that
+# reason; carry both or carry neither.
+provenance:
+	@$(PYTHON) $(CLI) --corpus $(CORPUS) provenance --since $(SINCE)
+
+# Reader, not a gate: measures how much each spec is still moving, and prints
+# the spec -> core-reference-peers -> generators -> community pipeline with the
+# stages nobody reports yet shown as `unreported` rather than omitted.
+convergence:
+	@$(PYTHON) $(CLI) --corpus $(CORPUS) convergence
 
 # Hermetic: bind-mount the corpus read-only at /work, with /work as both cwd
 # and corpus root (the image stays corpus-free). Exits 1 on violations, 2 if it
@@ -96,7 +142,9 @@ parity:
 compile:
 	@$(PYTHON) -m py_compile \
 		spec-tool/cli.py spec-tool/model.py spec-tool/render.py spec-tool/topology.py \
-		spec-tool/standards.py spec-tool/style.py spec-tool/config.py && echo "✓ spec-tool package compiles"
+		spec-tool/standards.py spec-tool/style.py spec-tool/corpus.py \
+		spec-tool/coherence.py spec-tool/ledger.py spec-tool/provenance.py \
+		spec-tool/convergence.py spec-tool/config.py && echo "✓ spec-tool package compiles"
 
 # --- ADR-0019 Tier-1 verbs (over the tool's OWN code) -----------------------
 # This is a stdlib-only Python tool (no third-party deps — see AGENTS.md), so
@@ -108,6 +156,12 @@ compile:
 test: compile parity
 	@$(PYTHON) spec-tool/tests/address_selftest.py
 	@$(PYTHON) spec-tool/tests/standards_selftest.py
+	@$(PYTHON) spec-tool/tests/coherence_selftest.py
+	@$(PYTHON) spec-tool/tests/corpus_selftest.py
+	@$(PYTHON) spec-tool/tests/convergence_selftest.py
+	@$(PYTHON) spec-tool/tests/coverage_selftest.py
+	@$(PYTHON) spec-tool/tests/ledger_selftest.py
+	@$(PYTHON) spec-tool/tests/provenance_selftest.py
 
 lint: compile
 

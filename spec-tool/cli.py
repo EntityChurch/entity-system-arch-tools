@@ -9,12 +9,15 @@ that reads the one shared model (`model.py`) and the one config
     spec tree <file> [--symbols|--refs|--json|--level N]   structural tree (reader)
     spec render <file> [--what …|--format …|--output …]    catalogs (reader)
     spec topology [ROOT] [--json|--dot]                    corpus graph (reader)
+    spec coverage [ROOT] [--gaps|--json]                   spec -> guide/proposal/research (reader)
     spec address [ROOT] [--worklist …|--gate|--json]       §11 addressing validator
     spec standards [--root …|--refine|--json]              release-readiness gate
     spec style [--root …|--all|--json|--config …]          naming gate
     spec coherence [--root …|--json]                       internal-consistency gate
     spec corpus [--root …|--vendor …|--json]               test-vector artifact gate
     spec convergence [--window N|--json]                   spec rate-of-change + pipeline
+    spec ledger [--root …|--json]                          declared counts vs the directories
+    spec provenance [--since REF|--json]                   L1: normative spec edit needs a proposal
     spec check                                             run all three gates (style + standards + coherence)
     spec config [CONFIG.toml]                              print the resolved config
 
@@ -55,6 +58,9 @@ import address
 import coherence
 import convergence
 import corpus
+import coverage
+import ledger
+import provenance
 import model
 import render
 import standards
@@ -74,6 +80,9 @@ DELEGATES = {
     "style": style.main,
     "corpus": corpus.main,
     "convergence": convergence.main,
+    "coverage": coverage.main,
+    "ledger": ledger.main,
+    "provenance": provenance.main,
 }
 
 
