@@ -22,7 +22,16 @@ Finding classes:
                      OR a `§` with a *detached* doc mention on the line (the
                      "based on V7 ... §5.2" trap). Always judgment.
   * dangling       — a citation whose target is not a file in the corpus.
-                     Judgment: Forward / Stale / Leak (§11.4).
+                     Judgment: Forward / Stale / Leak (§11.4). A `(planned)`
+                     marker exempts a Forward ref ONLY inside a non-normative
+                     note or an Extension Points section — §11.4's second
+                     clause, which this analyzer ignored until 2026-08-17.
+  * absent-doc     — a document *named* in normative text, governing no `§`,
+                     whose target exists nowhere in the namespace. Same §11.4
+                     disposition as `dangling`; separate class because the
+                     population is different (a phantom document, not a broken
+                     citation) and because folding it in would have silently
+                     quadrupled a count that status documents quote.
   * stale-section  — `DOC.md §N.M` whose doc resolves but whose section does not.
                      Judgment: redirect to an existing section.
 
@@ -226,11 +235,12 @@ def analyze_doc(doc: Doc, docs: Dict[str, Doc], env: dict) -> List[Finding]:
             continue
         events = scan_line(line, env["nick_re"], env["nick_map"],
                            env["stems"], env["prefixes"], env["families"])
-        if not any(e["k"] == "sec" for e in events):
+        if not any(e["k"] in ("sec", "doc") for e in events):
             continue
         if not is_normative_body(doc, lineno):
             continue
 
+        governed_docs = set()   # id() of doc events consumed as a §'s antecedent
         ante = None   # last doc/nick event
         for ev in events:
             if ev["k"] in ("doc", "nick"):
@@ -241,6 +251,7 @@ def analyze_doc(doc: Doc, docs: Dict[str, Doc], env: dict) -> List[Finding]:
             governed = ante is not None and _gap_is_connector(line, ante["e"], ev["s"])
 
             if governed and ante["k"] == "doc":
+                governed_docs.add(id(ante))
                 out.extend(_external_token(doc, rel, lineno, line, ante, sec, docs, env))
             elif governed and ante["k"] == "nick":
                 out.extend(_external_nick(doc, rel, lineno, line, ante, sec, docs, env))
@@ -253,6 +264,12 @@ def analyze_doc(doc: Doc, docs: Dict[str, Doc], env: dict) -> List[Finding]:
                 else:
                     det = None
                 out.extend(_bare_internal(doc, rel, lineno, line, ev, sec, det, docs))
+
+        # A doc name that governs no `§` is still an address — an absent one is
+        # a phantom document, and until 2026-08-17 nothing looked at it.
+        for ev in events:
+            if ev["k"] == "doc" and id(ev) not in governed_docs:
+                out.extend(_phantom_doc(doc, rel, lineno, line, ev, docs, env))
     return out
 
 
@@ -293,6 +310,29 @@ def _is_intent(tgt, env):
 
 
 _FORWARD_RE = re.compile(r"\((?:planned|forthcoming)\b")
+_NOTE_TITLE_RE = re.compile(
+    r"extension\s+points|informative|non-?normative|open\s+questions|"
+    r"rationale|background|cross-?references", re.IGNORECASE)
+
+
+def _in_note_context(doc: Doc, lineno: int, line: str) -> bool:
+    """§11.4's *second* clause: a forward reference is permitted only when it is
+    **confined to a non-normative note or an Extension Points section**. This
+    recognizes both shelters — a blockquote note (`> …`) and an enclosing
+    heading whose title marks the section informative.
+
+    `is_normative_body` is coarser than this on purpose: it excludes preamble,
+    unnumbered sections and Document History, so a numbered section's inline
+    note still reaches the scan. Without this check the `(planned)` marker
+    grants permission *anywhere*, which is how a `(planned)` pointer sat inside
+    a MUST bullet in `EXTENSION-NETWORK` §6.5.6 and gated nothing."""
+    if line.lstrip().startswith(">"):
+        return True
+    enc = enclosing_heading(doc, lineno)
+    if enc is None:
+        return False
+    _, _, title = enc
+    return _NOTE_TITLE_RE.search(title) is not None
 
 
 def _forward_marked(line: str, after_pos: int) -> bool:
@@ -300,8 +340,55 @@ def _forward_marked(line: str, after_pos: int) -> bool:
     `(forthcoming)` marker is an author-declared forward reference to a spec
     that has not landed yet — permitted, not a dangling/leak finding. The marker
     is the conformance signal (a forthcoming sibling extension, typically backed
-    by a `PROPOSAL-*`)."""
+    by a `PROPOSAL-*`).
+
+    The marker is necessary and NOT sufficient — see `_in_note_context` for the
+    confinement half of the same rule."""
     return _FORWARD_RE.search(line[after_pos:after_pos + 48]) is not None
+
+
+def _forward_permitted(doc: Doc, lineno: int, line: str, after_pos: int) -> bool:
+    """§11.4 Forward, both clauses: explicitly marked AND confined."""
+    return (_forward_marked(line, after_pos)
+            and _in_note_context(doc, lineno, line))
+
+
+def _phantom_doc(doc: Doc, rel, lineno, line, ev, docs, env) -> List[Finding]:
+    """A doc token that governs no `§`, naming a document that exists **nowhere
+    in the namespace**.
+
+    Deliberately narrow. This does NOT re-litigate `drift` (a bare `DOC` that
+    resolves) or `leak` (a real process artifact cited from normative text) —
+    both already have rules, and firing on every bare mention of a real document
+    would bury the one case that has no other detector: *normative text that
+    names a document which does not exist.*
+
+    Earned 2026-08-17. `EXTENSION-NETWORK` §6.5.3.1's `MANIFEST_GET` MUST read
+    "its revocation primitive is defined in `PROPOSAL-PEER-MANIFEST-STATIC-
+    HANDSHAKE`" — a proposal never written, in any repo. Two app-tier seats
+    built a static publishing surface against it; one shipped a non-conformant
+    `MANIFEST_GET`. `address` never saw the sentence: the scan skipped every
+    line carrying no `§`."""
+    tgt = ev["tok"]
+    if tgt == doc.stem or tgt in docs or tgt in env["namespace"]:
+        return []
+    if _path_like(line, ev) and not _is_intent(tgt, env):
+        return []
+    # Both §11.4 shelters apply to a bare mention exactly as to a citation: a
+    # Cross-references / Open-questions / Document-History section and a
+    # blockquote note are where provenance and forward pointers are *allowed*
+    # to name something the corpus does not hold. Measured 2026-08-17: without
+    # this the rule fires 228 times, ~200 of them legitimate provenance lists —
+    # and a gate that opens 228 red is a gate people learn to skip.
+    if _in_note_context(doc, lineno, line):
+        return []
+    if not _is_intent(tgt, env) and _forward_marked(line, ev["e"]):
+        return []
+    note = ("absent intent-artifact name (§11.3 leak, and the target does not "
+            "even exist)" if _is_intent(tgt, env)
+            else "named document absent from corpus (forward/stale/leak)")
+    return [Finding("absent-doc", "judgment", rel, lineno, ev["s"], tgt, tgt,
+                    None, None, None, note=note, target_class="absent")]
 
 
 def _external_token(doc, rel, lineno, line, ante, sec, docs, env):
@@ -318,8 +405,13 @@ def _external_token(doc, rel, lineno, line, ante, sec, docs, env):
             return []
         cls, note, tclass = disp
         if cls == "dangling" and not _is_intent(tgt, env) \
+                and _forward_permitted(doc, lineno, line, ante["e"]):
+            return []  # §11.4 Forward — marked `(planned)` AND confined to a note
+        if cls == "dangling" and not _is_intent(tgt, env) \
                 and _forward_marked(line, ante["e"]):
-            return []  # §11.4 Forward (planned) — spec-shaped name, author-marked
+            note = ("forward ref marked `(planned)` but in normative text — "
+                    "§11.4 permits it only in a non-normative note or an "
+                    "Extension Points section")
         ref = "%s §%s" % (tgt, sec) if sec else tgt
         return [Finding(cls, "judgment", rel, lineno, ante["s"], ref, tgt, sec,
                         None, None, note=note, target_class=tclass)]
@@ -500,7 +592,8 @@ def render_text(findings: List[Finding]) -> str:
     out = ["spec address — §11 conformance: %d deviation(s)  "
            "(mechanical %d, judgment %d)"
            % (len(findings), by_tier["mechanical"], by_tier["judgment"]), ""]
-    order = ["drift", "nickname", "bare-internal", "leak", "stale-section", "dangling"]
+    order = ["drift", "nickname", "bare-internal", "leak", "stale-section",
+             "dangling", "absent-doc"]
     for cls in order:
         items = by_cls.get(cls, [])
         if not items:

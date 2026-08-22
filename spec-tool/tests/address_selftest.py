@@ -199,7 +199,15 @@ def path_prefixed_real_spec_still_exempt():
 def forward_planned_permitted():
     # §11.4 Forward: a spec-shaped, author-marked (planned) citation to a not-yet-
     # landed sibling extension is permitted — not a dangling finding.
-    f = run("EXTENSION-X", "# t\n\n## 1. a\n\nSee EXTENSION-GHOST.md §3 (planned) here.\n",
+    #
+    # CORRECTED 2026-08-17. This case used to place the citation in ordinary
+    # normative prose and assert it was permitted, which encoded HALF of §11.4:
+    # the rule reads "permitted ONLY when explicitly marked `(planned)` **and
+    # confined to non-normative notes or an Extension Points section**." The
+    # confinement clause was never implemented, and the test froze the gap in
+    # place — so the shelter is now a blockquote note, which is what §11.4
+    # actually grants.
+    f = run("EXTENSION-X", "# t\n\n## 1. a\n\n> See EXTENSION-GHOST.md §3 (planned) here.\n",
             set(), namespace={"EXTENSION-X"})
     assert not [x for x in f if x.cls == "dangling"], f
 
@@ -353,6 +361,61 @@ def a_guide_citing_a_present_intent_artifact_is_permitted_provenance():
     out = address._dispose_external("PROPOSAL-REAL", "1.1", "guide", env)
     assert out is None, ("a guide citing a real proposal is informational "
                          "provenance under §11.3, not a leak; got %r" % (out,))
+
+
+@case
+def absent_doc_fires_on_a_named_document_with_no_section():
+    # THE 2026-08-17 defect, verbatim in shape. `EXTENSION-NETWORK` §6.5.3.1's
+    # `MANIFEST_GET` MUST said its revocation primitive "is defined in
+    # PROPOSAL-PEER-MANIFEST-STATIC-HANDSHAKE" — a document that has never
+    # existed in any repo. Two app-tier seats built a static publishing surface
+    # against it. `address` never saw the sentence, because the scan skipped
+    # every line carrying no `§`.
+    f = run("HOST", "# t\n\n## 1. a\n\n- **Rule (MUST).** Its primitive is "
+                    "defined in `PROPOSAL-NEVER-WRITTEN`.\n",
+            {"EXTENSION-ALPHA"})
+    ad = [x for x in f if x.cls == "absent-doc"]
+    assert ad and ad[0].target == "PROPOSAL-NEVER-WRITTEN", f
+
+
+@case
+def absent_doc_silent_on_a_document_that_exists():
+    f = run("HOST", "# t\n\n## 1. a\n\nSee `EXTENSION-ALPHA` for the shape.\n",
+            {"EXTENSION-ALPHA"})
+    assert not [x for x in f if x.cls == "absent-doc"], f
+
+
+@case
+def absent_doc_silent_in_a_cross_references_section():
+    # §11.3 row 2: provenance lists are where naming a document the corpus does
+    # not hold is *allowed*. Measured 2026-08-17: without this shelter the rule
+    # opens 228 red on this corpus, ~200 of them legitimate provenance — and a
+    # gate that opens 228 red is a gate people learn to skip.
+    f = run("HOST", "# t\n\n## 9. Cross-references\n\n"
+                    "- `PROPOSAL-NEVER-WRITTEN` — provenance.\n",
+            {"EXTENSION-ALPHA"})
+    assert not [x for x in f if x.cls == "absent-doc"], f
+
+
+@case
+def absent_doc_silent_in_a_blockquote_note():
+    f = run("HOST", "# t\n\n## 1. a\n\n> Note: `EXTENSION-FUTURE` (planned) "
+                    "will carry this.\n",
+            {"EXTENSION-ALPHA"})
+    assert not [x for x in f if x.cls == "absent-doc"], f
+
+
+@case
+def forward_marked_citation_in_normative_text_is_not_exempt():
+    # §11.4 has TWO clauses — marked `(planned)` AND confined to a
+    # non-normative note or an Extension Points section. The analyzer
+    # implemented only the first, so a `(planned)` pointer sat inside a MUST
+    # bullet in `EXTENSION-NETWORK` §6.5.6 and gated nothing.
+    f = run("HOST", "# t\n\n## 1. a\n\n- **Rule (MUST).** Per "
+                    "`EXTENSION-FUTURE.md` §1.1 (planned) the walk holds.\n",
+            {"EXTENSION-ALPHA"})
+    dg = [x for x in f if x.cls == "dangling"]
+    assert dg and "normative text" in dg[0].note, f
 
 
 def main():
