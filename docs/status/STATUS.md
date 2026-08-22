@@ -1,6 +1,6 @@
 # entity-system-arch-tools — status
 
-_Updated: 2026-06-30 · public: v0.8.0 (master)_
+_Updated: 2026-08-22 · public: v0.8.1 (master)_
 
 ## Where it is
 
@@ -59,17 +59,27 @@ that collapses a changelog-blob Version header to a bare version and drops a
 trailing Document History section, never touches inline prose, and writes a cleaned
 **copy** (source untouched).
 
-**Maturity: initial public research-preview, v0.8.0.** The CLI, both gates, the
-three readers, the addressing validator, the parity oracle (`make parity`) and the
-`address` self-test are all in place and exercised. The tool has already been used
+**Maturity: public research-preview, v0.8.1.** The CLI, the readers, the addressing
+validator, the parity oracle (`make parity`) and the per-analyzer self-tests are all in
+place and exercised. `0.8.1` adds seven analyzers — `coherence`, `convergence`, `corpus`,
+`ledger`, `provenance`, `coverage` and `sdksync` — each with its own self-test and `make`
+target, and fixes the corpus-resolution defect described below. The tool has already been used
 in anger to drive real release-readiness cleanup over multi-spec corpora — producing
 authoritative `file:line` worklists rather than hand-grep — which is what hardened
 the gate rules and the addressing classifier.
 
 ## Where we left off
 
-Stable at the v0.8.0 research-preview line; no code changes are in flight. The next
-substantive work is cutting the v0.8.0 `CHANGELOG.md` entry out of `[Unreleased]`.
+**`0.8.1` is cut.** The headline of it is a correctness fix, not the new surface: the gates
+could not reach any corpus and did not say so — the corpus root was derived from a path that
+exists in no post-split checkout, so `standards` scanned zero files and reported `0 error(s)`
+with exit 0. A gate that passes because it is looking at nothing is worse than one that
+fails. `standards` now exits **2** (could-not-look) rather than 0 when it cannot reach a
+corpus, and `check` reports `could-not-look` distinctly from `fail`.
+
+`entity-system-arch-tools` tracks its **own** version line from `0.8.1` onward. It shares no
+release cadence with `entity-core-protocol`; a matching third component between the two is
+coincidence, not correspondence.
 
 ## Backlog
 
