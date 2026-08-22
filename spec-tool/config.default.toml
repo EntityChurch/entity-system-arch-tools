@@ -251,6 +251,12 @@ carve_outs = ["hygiene", "cohort-finding"]
 
 [analyzer.provenance.rules]
 normative-edit-without-proposal = "warn"
+# An informative document under `specs/` (an ARCHITECTURE-*, a navigation doc, a
+# rulebook) whose version moved without its normative-token count moving. It is
+# reported so the change stays visible, at `info`, because L1 is about normative
+# spec edits and an arch-doc is where rationale is SUPPOSED to live. A
+# normative-token change in the same file is still the normative finding.
+informative-doc-revision        = "info"
 # A claimed exemption the gate does not recognise is a different fact from no
 # exemption at all, and is reported as its own rule rather than folded in.
 spec-change-trailer-unknown     = "warn"

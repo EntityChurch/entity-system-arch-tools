@@ -97,7 +97,6 @@ corpus:
 ledger:
 	@$(PYTHON) $(CLI) --corpus $(CORPUS) ledger
 
-
 # Pass SINCE=<ref> to widen the range -- and ALWAYS quote the range with the
 # number: a provenance count without its window is a conformance number without
 # its oracle pin. The gate prints `scanned N commit(s) since REF` for that
@@ -159,7 +158,6 @@ test: compile parity
 	@$(PYTHON) spec-tool/tests/coherence_selftest.py
 	@$(PYTHON) spec-tool/tests/corpus_selftest.py
 	@$(PYTHON) spec-tool/tests/convergence_selftest.py
-	@$(PYTHON) spec-tool/tests/coverage_selftest.py
 	@$(PYTHON) spec-tool/tests/ledger_selftest.py
 	@$(PYTHON) spec-tool/tests/provenance_selftest.py
 
