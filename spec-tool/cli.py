@@ -28,6 +28,7 @@ that reads the one shared model (`model.py`) and the one config
     spec inbound [--gate|--owed|--peers D|--json]          packets addressed to us vs our ledger
     spec inventory [--gate|--owed|--update-baseline]        conformance rows: addressable, or only quotable
     spec declare [--gate|--owed|--update-baseline]          the §3.3 dependency contract, all seven fields
+    spec disclose [--peer-root P|--gate|--owed|--json]      §5.3a: does a core fold name the cells it crosses
     spec census [--doc …|--drift|--gaps|--json]            normative surface vs the cohort's own citations
     spec vocab  [--prefix …|--owed|--gate|--json]          app-tier TYPE VOCABULARY: does the field converge?
     spec sdksync [--root …|--json|--unpinned|--update]      SDK restatements vs their sources
@@ -86,6 +87,7 @@ import ledger
 import inbound
 import inventory
 import declare
+import disclose
 import register
 import sdksync
 import pointers
@@ -125,6 +127,7 @@ DELEGATES = {
     "inbound": inbound.main,
     "inventory": inventory.main,
     "declare": declare.main,
+    "disclose": disclose.main,
     "register": register.main,
     "sdksync": sdksync.main,
     "pointers": pointers.main,

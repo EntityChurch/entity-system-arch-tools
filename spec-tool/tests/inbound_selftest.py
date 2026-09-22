@@ -173,12 +173,30 @@ def main() -> int:
         ok("`**To:** arch` is recognised as addressed to us",
            len(res["owed"]) == 1, res)
 
-        # ---- 7. word-boundary: arch-tools must not satisfy `arch` ---------
+        # ---- 7. word-boundary: a long name must not satisfy a short alias --
+        #
+        # ⚠ **This case used `entity-system-arch-tools` against the alias
+        # `arch` until 2026-09-17, and the SEAT model made that example
+        # invalid rather than wrong** — arch-tools is now genuinely one of this
+        # seat's repositories, so a packet addressed to it IS ours, by its own
+        # name and not by a substring of `arch`.
+        #
+        # **The guard it was protecting is untouched and must never regress**,
+        # so it is asserted twice: here through `scan` against a genuine third
+        # party whose name contains a short alias, and directly on `names_us`
+        # below for the original pair. Re-pointing a case is legitimate;
+        # deleting one because the fixture moved is how a real defect comes
+        # back.
+        ok("the alias `arch` still does not fire inside `arch-tools`",
+           not inbound.names_us("entity-system-arch-tools", ("arch",)))
+        ok("the alias `rust` still does not fire inside `browser-rust`",
+           not inbound.names_us("entity-browser-rust", ("rust",)))
+
         code, res = run(
             tmp, "nothing cited\n",
             {"entity-core-go": {"ROUTING-2026-09-03-b-other-repo.md":
-                                "**To:** `entity-system-arch-tools`\n"}})
-        ok("`entity-system-arch-tools` does not match the alias `arch`",
+                                "**To:** `entity-browser-rust`\n"}})
+        ok("a third party whose name contains a short alias is not ours",
            res["addressed_elsewhere"] == 1 and not res["owed"], res)
 
         # ---- 8. brace expansion does not create a false match -------------
@@ -520,6 +538,357 @@ def main() -> int:
        inbound.classify(BARE_CC, PY) == "cc")
     ok("a bare `rust` in a cc list is a cc, not a to",
        inbound.classify(BARE_CC, RUST) == "cc")
+
+    # ---- the RECENCY WINDOW -------------------------------------------
+    #
+    # The load-bearing assertion is the third one. `--since` filters the
+    # REPORT, and the obvious implementation filters the SCAN — which would
+    # reintroduce, one feature later, the exact defect this gate shipped in
+    # 2026-09-11: a `date-letter` token reaching several packets discharging
+    # all of them. Filter first and the out-of-window twin disappears, the
+    # token looks unique, and the in-window packet is silently credited.
+    ok("`7d` resolves to an absolute date",
+       len(inbound.resolve_since("7d")) == 10)
+    ok("an ISO date passes through",
+       inbound.resolve_since("2026-09-10") == "2026-09-10")
+    try:
+        inbound.resolve_since("last tuesday")
+        ok("a garbage window is rejected", False)
+    except ValueError:
+        ok("a garbage window is rejected", True)
+
+    ok("a packet is dated from its own id",
+       inbound.packet_date("ROUTING-2026-09-16-h-arch-thing.md")
+       == "2026-09-16")
+    ok("a packet with no date in its name is UNKNOWN, not old",
+       inbound.packet_date("ROUTING-arch-no-date.md") is None)
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+
+        SEATS = {"entity-core-go": {
+            "ROUTING-2026-09-16-a-arch-recent.md": TO_ARCH,
+            "ROUTING-2026-08-01-a-arch-ancient.md": TO_ARCH,
+            "ROUTING-arch-undated.md": TO_ARCH,
+        }}
+        peers = build(tmp, "nothing is cited here\n", SEATS)
+        root = peers / "entity-system-architecture"
+
+        code, res = inbound.scan(root, peers)
+        ok("without a window every packet is owed", len(res["owed"]) == 3,
+           res["owed"])
+
+        code, res = inbound.scan(root, peers, None, "2026-09-10")
+        stems = sorted(r["stem"] for r in res["owed"])
+        ok("the window drops the older packet",
+           not any("ancient" in s for s in stems), stems)
+        ok("the window keeps the recent one",
+           any("recent" in s for s in stems), stems)
+        ok("an UNDATED packet stays in the window — unknown is not old",
+           any("undated" in s for s in stems), stems)
+        ok("what the window excluded is counted, not dropped",
+           res["excluded_by_window"]["owed"] == 1, res["excluded_by_window"])
+        ok("the window is named in the result so a run is quotable",
+           res["since"] == "2026-09-10")
+
+        # THE NEGATIVE CONTROL. One ledger row cites `ROUTING-2026-09-10-c`.
+        # Two packets in different repos carry that id — one inside the
+        # window, one outside. The citation resolves to neither, and the
+        # window must not make it resolve to the survivor.
+        AMBIG = {
+            "entity-core-go": {
+                "ROUTING-2026-09-10-c-arch-one.md": TO_ARCH},
+            "entity-workbench-go": {
+                "ROUTING-2026-09-10-c-arch-two.md": TO_ARCH,
+                "ROUTING-2026-09-16-z-arch-filler.md": TO_ARCH},
+        }
+        peers = build(tmp, "we cite ROUTING-2026-09-10-c and nothing else\n",
+                      AMBIG)
+        root = peers / "entity-system-architecture"
+        code, res = inbound.scan(root, peers, None, "2026-09-16")
+        ok("an ambiguous citation stays ambiguous inside a window",
+           res["cited"] == 0, res["cited"])
+        ok("the out-of-window twin still blocks the credit",
+           len(res["ambiguous_citations"]) == 1, res["ambiguous_citations"])
+
+    # ---- NAME-ADDRESSED DOCUMENTS OUTSIDE `docs/status` ----------------
+    #
+    # Measured 2026-09-17: `entity-core-keystone` files `HANDOFF-TO-ARCH-*`
+    # into `research/stewardship/`, and their own tracker cites those files
+    # as the Packet column for 14 of their 18 open asks against arch. Every
+    # one was invisible to this gate — wrong directory AND wrong filename,
+    # either alone sufficient. `entity-core-go` files four more under
+    # `docs/validation/reports/`.
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        peers = build_raw(
+            tmp,
+            # The ROUTING filler is cited too, so the ONLY thing that could
+            # move the exit code is the new class — which is the assertion.
+            {"docs/COHORT-OPEN-ITEMS.md":
+                 "we cite HANDOFF-TO-ARCH-2026-09-08-seen and "
+                 "ROUTING-2026-09-16-a-arch-filler\n"},
+            {"entity-core-keystone": {
+                "ROUTING-2026-09-16-a-arch-filler.md": TO_ARCH}})
+        ks = peers / "entity-core-keystone"
+        deep = ks / "research" / "stewardship"
+        deep.mkdir(parents=True)
+        (deep / "HANDOFF-TO-ARCH-2026-09-08-seen.md").write_text("x")
+        (deep / "HANDOFF-TO-ARCH-2026-09-09-unseen.md").write_text("x")
+        # A slug that merely MENTIONS us is not an addressee. The signal is
+        # `to-<alias>`, with a separator in front of it.
+        (deep / "NOTES-2026-09-09-thoughts-on-arch-and-others.md").write_text("x")
+        # Build output holds byte-copies of real documents; counting those is
+        # the clone defect arriving by a different road.
+        staging = ks / ".publish-staging" / "buildset-abc"
+        staging.mkdir(parents=True)
+        (staging / "HANDOFF-TO-ARCH-2026-09-09-unseen.md").write_text("x")
+
+        root = peers / "entity-system-architecture"
+        code, res = inbound.scan(root, peers)
+        stems = sorted(r["stem"] for r in res["name_addressed"])
+        ok("a HANDOFF-TO-US outside docs/status is found",
+           stems == ["HANDOFF-TO-ARCH-2026-09-08-seen",
+                     "HANDOFF-TO-ARCH-2026-09-09-unseen"], stems)
+        ok("a slug that merely mentions the alias is not an addressee",
+           not any("NOTES" in s for s in stems), stems)
+        ok("build staging is pruned, not counted",
+           len(res["name_addressed"]) == 2, res["name_addressed"])
+        by_stem = {r["stem"]: r for r in res["name_addressed"]}
+        ok("one cited by full stem is credited",
+           by_stem["HANDOFF-TO-ARCH-2026-09-08-seen"]["cited"])
+        ok("...and the uncited one is not",
+           not by_stem["HANDOFF-TO-ARCH-2026-09-09-unseen"]["cited"])
+        ok("a name-addressed document is dated from its filename",
+           by_stem["HANDOFF-TO-ARCH-2026-09-09-unseen"]["date"]
+           == "2026-09-09")
+        ok("the seat is the REPO, not the first directory under it",
+           {r["seat"] for r in res["name_addressed"]}
+           == {"entity-core-keystone"},
+           {r["seat"] for r in res["name_addressed"]})
+        ok("this class does not gate on introduction",
+           code == inbound.CLEAN, code)
+
+        # A `ROUTING-…-to-arch-…` is the overwhelmingly common spelling. It
+        # is already counted as a packet; counting it again here would make
+        # one document two obligations and roughly double the estate.
+        ok("a ROUTING packet is not counted a second time",
+           not any(s.startswith("ROUTING") for s in stems), stems)
+
+    ok("a deep path attributes to the repo, not to `docs`",
+       inbound.seat_of(Path("/e/entity-core-go/docs/validation/reports/x.md"),
+                       Path("/e")) == "entity-core-go")
+    ok("...and without a peer root the old rule still applies",
+       inbound.seat_of(Path("/e/entity-core-go/docs/status/x.md"))
+       == "entity-core-go")
+
+    # ---- TRACKER RECIPROCITY -------------------------------------------
+    #
+    # `entity-core-keystone`'s ask, 2026-09-16, which they had taken from
+    # `entity-system-conformance` against themselves first: twelve asks that
+    # never arrived because the receiving seat kept no tracker for the
+    # sending one. Both directions, because a check that only ever reports
+    # a gap cannot show that the pass condition is right.
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        peers = build_raw(
+            tmp,
+            {"docs/COHORT-OPEN-ITEMS.md":
+                 # BOTH packets are cited, so the only thing left that could
+                 # move the exit code is the missing tracker. That is the
+                 # point of the assertion at the end of this block.
+                 "rows for ROUTING-2026-09-16-a-arch-x and "
+                 "ROUTING-2026-09-16-b-arch-y\n",
+             "docs/status/TRACKER-entity-core-go.md": "we track go\n",
+             # A tracker for a SUBJECT, not a seat. It must not be read as
+             # reciprocity with a repository that does not exist.
+             "docs/status/TRACKER-THE-EXCHANGE-ARC.md": "a subject\n"},
+            {"entity-core-go": {
+                "ROUTING-2026-09-16-a-arch-x.md": TO_ARCH,
+                "TRACKER-entity-system-architecture.md": "go tracks us\n"},
+             "entity-core-keystone": {
+                 "ROUTING-2026-09-16-b-arch-y.md": TO_ARCH,
+                 "TRACKER-entity-system-architecture.md": "ks tracks us\n"}})
+        root = peers / "entity-system-architecture"
+        code, res = inbound.scan(root, peers)
+        rec = res["tracker_reciprocity"]
+        ok("a seat aiming a tracker at us with no counterpart is named",
+           rec["not_reciprocated"] == ["entity-core-keystone"],
+           rec["not_reciprocated"])
+        ok("a seat we DO keep one for is not named",
+           "entity-core-go" not in rec["not_reciprocated"])
+        ok("a tracker naming a subject is not counted as a seat",
+           rec["we_keep_for_them"] == ["entity-core-go"],
+           rec["we_keep_for_them"])
+        ok("an unreciprocated tracker is REPORTED and never gates",
+           code == inbound.CLEAN and not res["owed"]
+           and rec["not_reciprocated"], (code, res["owed"]))
+
+    # ------------------------------------------------------------------
+    # A SEAT IS NOT A REPOSITORY `[2026-09-17]`
+    #
+    # Replayed against the incident that motivated it, in BOTH directions —
+    # the standing rule for a new or widened gate here, and the one that has
+    # caught three defects in `expiry` and two in `deps`.
+    #
+    # The incident: arch owns three trees and `self_name = root.name` graded
+    # one. A packet addressed to `entity-core-protocol` scored
+    # `addressed-elsewhere` — indistinguishable in every published number from
+    # mail for another seat. Live, that hid two owed packets and a standing
+    # nine-ask tracker.
+    # ------------------------------------------------------------------
+    TO_PROTOCOL = "**To:** `entity-core-protocol`\n"
+    TO_TOOLS = "**To:** `entity-system-arch-tools`\n"
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+
+        # --- DIRECTION 1: it now FIRES on what it used to miss ---
+        code, res = run(tmp, "No citations here.\n", {
+            "entity-core-formalization": {
+                "ROUTING-2026-09-16-f-entity-core-protocol-n5.md": TO_PROTOCOL,
+            },
+        })
+        ok("a packet addressed to a SECOND repo of this seat is owed",
+           code == inbound.VIOLATIONS and len(res["owed"]) == 1, res["owed"])
+        ok("the founding incident is a REGRESSION test, not a story",
+           res["addressed_to_us"] == 1 and res["addressed_elsewhere"] == 0,
+           (res["addressed_to_us"], res["addressed_elsewhere"]))
+
+        # --- DIRECTION 2: it does NOT fire on a genuine third party ---
+        # The dangerous direction for a widening: pulling somebody else's mail
+        # into our inbox. `entity-core-rust` is not us and never becomes us.
+        code, res = run(tmp, "No citations here.\n", {
+            "entity-core-go": {"ROUTING-2026-09-16-a-rust.md": TO_OTHER},
+        })
+        ok("a third party's packet is still not ours",
+           code == inbound.CLEAN and res["addressed_elsewhere"] == 1,
+           (code, res["addressed_elsewhere"]))
+
+        # --- the breakdown is the falsifiable half of the count ---
+        code, res = run(tmp, "No citations here.\n", {
+            "entity-core-formalization": {
+                "ROUTING-2026-09-16-e-entity-core-protocol-a.md": TO_PROTOCOL,
+                "ROUTING-2026-09-16-f-entity-core-protocol-b.md": TO_PROTOCOL,
+            },
+            "entity-core-go": {
+                "ROUTING-2026-09-16-c-arch.md": TO_ARCH,
+                "ROUTING-2026-09-16-d-tools.md": TO_TOOLS,
+            },
+        })
+        ok("addressed-here breaks down by which repo was named",
+           res["addressed_by_repo"] == {"entity-core-protocol": 2,
+                                        "entity-system-architecture": 1,
+                                        "entity-system-arch-tools": 1},
+           res["addressed_by_repo"])
+        ok("with no overlap, attribution sums to the total",
+           sum(res["addressed_by_repo"].values()) == res["addressed_to_us"]
+           and res["addressed_multi_named"] == 0,
+           (res["addressed_by_repo"], res["addressed_to_us"]))
+
+        # ⚠ **The assertion above passed on a fixture with no multi-match
+        # packet, and live it was 316 attributions over 308 packets.** A sum
+        # rule asserted only where it holds is not asserted. So: a packet
+        # naming TWO of our repos is ONE obligation attributed twice, and the
+        # overlap must be COUNTED rather than silently making the table wrong.
+        code, res = run(tmp, "No citations here.\n", {
+            "entity-core-go": {
+                "ROUTING-2026-09-16-m-both.md":
+                    "**To:** `entity-system-architecture`, "
+                    "`entity-core-protocol`\n",
+            },
+        })
+        ok("a packet naming two of our repos is ONE owed obligation",
+           len(res["owed"]) == 1, res["owed"])
+        ok("...attributed to both, and the overlap is counted not hidden",
+           res["addressed_by_repo"] == {"entity-system-architecture": 1,
+                                        "entity-core-protocol": 1}
+           and res["addressed_multi_named"] == 1,
+           (res["addressed_by_repo"], res["addressed_multi_named"]))
+
+        # A packet that only CCs us is keyed `(cc)` — not `unattributed`.
+        # The first cut published `unattributed 30` for thirty packets whose
+        # addressee parsed perfectly and simply was not us.
+        code, res = run(tmp, "Rowed: `ROUTING-2026-09-16-n-cc`.\n", {
+            "entity-core-go": {"ROUTING-2026-09-16-n-cc.md":
+                               TO_OTHER_CC_US},
+        })
+        ok("a cc-only packet is attributed `(cc)`, never to a repo",
+           res["addressed_by_repo"] == {"(cc)": 1},
+           res["addressed_by_repo"])
+
+        # A citation still discharges, whichever of our repos was addressed —
+        # one seat, one ledger, and the ledger is in the OTHER repository.
+        code, res = run(
+            tmp,
+            "Rowed: `ROUTING-2026-09-16-f-entity-core-protocol-n5`.\n",
+            {"entity-core-formalization": {
+                "ROUTING-2026-09-16-f-entity-core-protocol-n5.md": TO_PROTOCOL,
+            }})
+        ok("one ledger discharges mail to any repo of the seat",
+           code == inbound.CLEAN and res["cited"] == 1, res)
+
+        # --- running from the OTHER member resolves the same channel ---
+        # Symmetry is the property that makes the fix a seat model rather than
+        # a special case: `--root ../entity-core-protocol` must grade the same
+        # mail against the same ledger, which lives one directory over.
+        peers = build(tmp, "No citations here.\n", {
+            "entity-core-formalization": {
+                "ROUTING-2026-09-16-f-entity-core-protocol-n5.md": TO_PROTOCOL,
+            },
+        })
+        (peers / "entity-core-protocol" / "docs" / "status").mkdir(
+            parents=True, exist_ok=True)
+        code, res = inbound.scan(peers / "entity-core-protocol", peers)
+        ok("running from a seat member with NO ledger is not could-not-look",
+           code != inbound.CANNOT_LOOK, res.get("error"))
+        ok("it finds the seat's ledger in the sibling repo",
+           res.get("ledgers") == ["docs/COHORT-OPEN-ITEMS.md"],
+           res.get("ledgers"))
+        ok("and it reports the same owed packet",
+           len(res["owed"]) == 1, res["owed"])
+
+        # --- our own repos are not scanned as peers ---
+        # Otherwise arch's own OUTBOUND packets, sitting in `entity-core-
+        # protocol/docs/status/`, would be read as inbound mail to ourselves.
+        peers = build(tmp, "No citations here.\n", {
+            "entity-core-go": {"ROUTING-2026-09-16-y.md": TO_OTHER},
+        })
+        d = peers / "entity-core-protocol" / "docs" / "status"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "ROUTING-2026-09-16-z-ours.md").write_text(TO_ARCH,
+                                                        encoding="utf-8")
+        code, res = inbound.scan(peers / "entity-system-architecture", peers)
+        ok("our own tree is not scanned as a peer's outbox",
+           not any("entity-core-protocol" in o["file"] for o in res["owed"]),
+           res["owed"])
+
+        # --- a peer's TRACKER aimed at our other repo is an inbound surface ---
+        peers = build(tmp, "No citations here.\n", {
+            "entity-core-go": {"ROUTING-2026-09-16-y.md": TO_OTHER},
+        })
+        t = peers / "entity-core-formalization" / "docs" / "status"
+        t.mkdir(parents=True, exist_ok=True)
+        (t / "TRACKER-entity-core-protocol.md").write_text(
+            "asks P-2..P-10\n", encoding="utf-8")
+        code, res = inbound.scan(peers / "entity-system-architecture", peers)
+        ok("a peer tracker naming our OTHER repo is reported",
+           [r["seat"] for r in res["peer_trackers"]]
+           == ["entity-core-formalization"], res["peer_trackers"])
+        ok("a tracker is still never a discharge and never gates",
+           code == inbound.CLEAN and not res["owed"], (code, res["owed"]))
+
+        # --- a single-repo seat is completely unaffected ---
+        # Every seat but arch. The widening must be invisible to them.
+        peers = build(tmp, "No citations here.\n", {
+            "entity-core-go": {"ROUTING-2026-09-16-y.md": TO_OTHER},
+        })
+        kd = peers / "entity-core-keystone" / "docs"
+        (kd / "status").mkdir(parents=True, exist_ok=True)
+        (kd / "COHORT-OPEN-ITEMS.md").write_text("empty\n", encoding="utf-8")
+        code, res = inbound.scan(peers / "entity-core-keystone", peers)
+        ok("a single-repo seat resolves to exactly itself",
+           res["seat_repos"] == ["entity-core-keystone"], res["seat_repos"])
 
     print()
     if FAILURES:

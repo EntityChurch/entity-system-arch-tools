@@ -280,6 +280,54 @@ bound, is the normative home.
         except pointers.CouldNotLook:
             ok("an empty scope raises CouldNotLook (exit 2, never 0)", True)
 
+    # --- `--floor`: UNDECLARED restatements in a conformance floor ---------
+    #
+    # `entity-core-keystone` `F87`, 2026-09-16: `ENTITY-CORE-PROTOCOL` §9.1
+    # landed the [MUST] that a restating row names its normative home, and
+    # then applied it to the two rows it was investigating.
+    FLOOR = (
+        "## 9. Conformance\n"
+        "\n"
+        "### 9.1 MUST Implement\n"
+        "\n"
+        "- Wire framing (§1.6)\n"
+        "- Dispatch routing (§1.4) — reject an inbound EXECUTE "
+        "targeting a non-self peer_id; it MUST NOT be reported as 404\n"
+        "- **The handler check (§6.8).** **§6.8 is the normative "
+        "home and this row is a restatement**; a handler MUST NOT emit 403\n"
+        "- A row that asserts a rule but cites no section and MUST NOT drift\n"
+        "\n"
+        "### 9.3 Notes\n"
+        "\n"
+        "- Prose outside a floor: a peer MUST NOT do this (§4.2)\n")
+    cands, total, asserting = pointers.floor_candidates(FLOOR)
+    texts = [t for _l, t in cands]
+
+    ok("a floor row asserting a rule with no authority is a candidate",
+       any("Dispatch routing" in t for t in texts), texts)
+    ok("a row naming its authority is NOT a candidate",
+       not any("handler check" in t for t in texts), texts)
+    # THE TRAP, and it is why the scan unit is a LIST ITEM and not a
+    # paragraph: a floor is one unbroken block of `- ` lines, so splitting on
+    # blank lines returns the whole floor as ONE unit and every row inherits
+    # the single authority phrase in it. **That failure reports a clean
+    # floor** — the silent-drop direction this module exists to close.
+    ok("an authority phrase does not leak to the adjacent row",
+       any("Dispatch routing" in t for t in texts), texts)
+    ok("a row naming a feature and asserting nothing is not counted",
+       not any("Wire framing" in t for t in texts), texts)
+    ok("a row asserting a rule but citing no section is not a candidate",
+       not any("cites no section" in t for t in texts), texts)
+    ok("prose outside a floor heading is not scanned",
+       not any("Prose outside" in t for t in texts), texts)
+    ok("the denominators are reported, not just the candidate count",
+       (total, asserting, len(cands)) == (4, 2, 1),
+       (total, asserting, len(cands)))
+
+    c2, t2, a2 = pointers.floor_candidates("# A doc\n\n- a list item (§1)\n")
+    ok("a document with no conformance floor yields no rows",
+       (t2, a2, len(c2)) == (0, 0, 0), (t2, a2, len(c2)))
+
     print("\n%d failure(s)" % len(FAILURES))
     return 1 if FAILURES else 0
 

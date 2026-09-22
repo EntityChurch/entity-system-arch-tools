@@ -118,7 +118,7 @@ with tempfile.TemporaryDirectory() as tmp:
     print("\nreachability — the core property")
     doc = "# D\n\nsee `%s` and `%s`.\n" % (home_public, sib_public)
     home_dev = commit(home, "docs", **{
-        "CANONICAL-DOCS.toml": 'path = "D.md"\n', "D.md": doc})
+        "CANONICAL-DOCS.toml": '[[doc]]\npath = "D.md"\n', "D.md": doc})
     code, res = run(home, [sib])
     ok("a commit on master and a sibling's public commit both pass",
        code == pins.CLEAN and not res["findings"],
@@ -211,7 +211,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # same key as a file declaration, so `is_file()` dropped it silently and the
     # gate reported clean over 169 unread published documents.
     commit(home, "declare a tree", **{
-        "CANONICAL-DOCS.toml": 'path = "D.md"\npath = "tree"\n',
+        "CANONICAL-DOCS.toml": '[[doc]]\npath = "D.md"\n\n[[keep_tree]]\npath = "tree"\n',
         "D.md": "# D\n\nclean.\n",
         "tree__a.md": "# A\n\npinned at `%s`.\n" % sib_dev,
         "tree__nested__b.md": "# B\n\nalso `%s`.\n" % sib_dev,
@@ -242,7 +242,53 @@ with tempfile.TemporaryDirectory() as tmp:
        code == pins.CLEAN and res["docs_scanned"] == 3,
        "scanned=%r findings=%r" % (res.get("docs_scanned"), res.get("findings")))
     commit(home, "restore single-file declaration", **{
-        "CANONICAL-DOCS.toml": 'path = "D.md"\n'})
+        "CANONICAL-DOCS.toml": '[[doc]]\npath = "D.md"\n'})
+
+    print("\n[[area]] and [[living]] are NOT the keep-list")
+    # [ADR-0021], 2026-09-17, added two tables that also carry `path` and both mean the
+    # OPPOSITE of "publish this": [[area]] says what a directory IS, and
+    # [[living]] internal = true says a doc is durable and must NEVER publish.
+    #
+    # The loader was a whole-file regex, so it read both as declarations. Measured on
+    # entity-system-generator the day it declared its areas: 39 declared docs became 86,
+    # and the gate reported 72 unreachable pins -- 60+ of them inside docs/outbox/, where
+    # citing a dev SHA is not merely allowed but correct ([ADR-0012] Am. 1). A gate that
+    # turns a correct declaration into sixty false reds is a gate somebody switches off.
+    commit(home, "declare an outbox area", **{
+        "CANONICAL-DOCS.toml":
+            '[[doc]]\npath = "D.md"\n\n'
+            '[[area]]\npath = "outbox"\nkind = "outbox"\npublishes = false\n\n'
+            '[[living]]\npath = "TRACKER.md"\ninternal = true\n',
+        "D.md": "# D\n\nclean.\n",
+        "outbox__packet.md": "# packet\n\npinned at `%s`.\n" % sib_dev,
+        "TRACKER.md": "# tracker\n\nread at `%s`.\n" % sib_dev})
+    code, res = run(home, [sib])
+    files = {f["file"] for f in res["findings"]}
+    ok("an [[area]] path is not scanned -- routing is internal and cites SHAs freely",
+       "outbox/packet.md" not in files, "got %r" % files)
+    ok("a [[living]] internal doc is not scanned either",
+       "TRACKER.md" not in files, "got %r" % files)
+    ok("...and the declared count reflects only the keep-list",
+       res["docs_declared"] == 1 and res["docs_scanned"] == 1,
+       "declared=%r scanned=%r" % (res.get("docs_declared"),
+                                   res.get("docs_scanned")))
+    ok("the run is CLEAN, not merely quiet",
+       code == pins.CLEAN, "got %d" % code)
+    # THE NEGATIVE CONTROL, and it is the load-bearing half: the same corpus read the OLD
+    # way must produce the defect. Without it this test passes just as well against a
+    # loader that scans nothing at all.
+    _old = pins.DECL.findall(
+        '[[doc]]\npath = "D.md"\n\n[[area]]\npath = "outbox"\n')
+    ok("the old whole-file regex DID read an [[area]] path as a declaration",
+       "outbox" in _old, "got %r" % _old)
+    # A manifest that does not decode falls back rather than going silent: over-reading
+    # the scope is a false red, losing it entirely is a gate reporting clean over nothing.
+    _paths, _parsed = pins.manifest_paths('path = "D.md"\n[[doc\n')
+    ok("an unparseable manifest falls back to the regex, and says it did not parse",
+       _parsed is False and _paths == ["D.md"],
+       "parsed=%r paths=%r" % (_parsed, _paths))
+    commit(home, "restore single-file declaration", **{
+        "CANONICAL-DOCS.toml": '[[doc]]\npath = "D.md"\n'})
 
     print("\nthree-valued contract — scanning nothing is not passing")
     code, res = run(home, [sib], branch="no-such-branch")

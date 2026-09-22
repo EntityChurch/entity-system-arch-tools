@@ -98,6 +98,7 @@ import json
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -108,8 +109,23 @@ TOKEN = re.compile(r"`([0-9a-f]{7,40})`")
 # CANONICAL-DOCS.toml declares paths as `path = "..."` or `file = "..."`.
 # A declaration is a FILE or a DIRECTORY: `[[keep_tree]]` declares a whole
 # directory as product, and everything prose under it publishes. Both spellings
-# use `path`, so the two are indistinguishable here and must both be honoured —
+# use `path`, so the two are indistinguishable BY KEY and must both be honoured —
 # see `expand_decl`.
+#
+# WHICH TABLE THE KEY IS IN IS NOT OPTIONAL, and reading this file with a regex
+# is what made it look optional. [ADR-0021] added `[[area]]` and `[[living]]` on
+# 2026-09-17 — blocks that say what a directory IS and which docs are durable —
+# and both use `path`. A whole-file regex reads them as publish declarations, so
+# the moment a repo declared `[[area]] path = "docs/outbox"` this gate started
+# scanning 42 routing packets and reporting 60 unreachable pins in a corpus that
+# by rule NEVER PUBLISHES. Internal docs cite SHAs freely ([ADR-0012] Am. 1);
+# every one of those findings was a false red, and a false red is what gets a
+# gate switched off.
+#
+# So the parse is a PARSE. `DECL` is kept for the fallback path only — a manifest
+# TOML cannot decode is a could-not-look, and losing the scope entirely there
+# would be worse than over-reading it.
+PUBLISHING_TABLES = ("doc", "keep_tree")
 DECL = re.compile(r'(?:path|file)\s*=\s*"([^"]+)"')
 
 # Directories that never publish even under a `keep_tree`, matching the promote
@@ -205,12 +221,39 @@ def reachable_from(repo: Path, tok: str, branch: str) -> Optional[bool]:
     return p.returncode == 0
 
 
+def manifest_paths(text: str) -> Tuple[List[str], bool]:
+    """The declared paths, and whether they came from a real TOML parse.
+
+    Only `[[doc]]` and `[[keep_tree]]` declare a PUBLISHED path. `[[area]]` says
+    what a directory is; `[[living]]` says a doc is durable and, with
+    `internal = true`, that it must NEVER publish. Reading either as a keep-list
+    entry inverts its meaning.
+
+    Falls back to the whole-file regex only when the manifest does not parse —
+    over-reading the scope is a false red, but losing it entirely is a gate that
+    reports clean over nothing.
+    """
+    try:
+        data = tomllib.loads(text)
+    except Exception:
+        return DECL.findall(text), False
+    out: List[str] = []
+    for table in PUBLISHING_TABLES:
+        for entry in data.get(table, []) or []:
+            if not isinstance(entry, dict):
+                continue
+            rel = entry.get("path") or entry.get("file")
+            if isinstance(rel, str) and rel:
+                out.append(rel)
+    return out, True
+
+
 def declared_docs(root: Path) -> Optional[List[str]]:
     c = root / "CANONICAL-DOCS.toml"
     if not c.is_file():
         return None
     try:
-        raw = DECL.findall(c.read_text(encoding="utf-8"))
+        raw, _parsed = manifest_paths(c.read_text(encoding="utf-8"))
     except OSError:
         return None
     out: List[str] = []

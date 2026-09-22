@@ -50,6 +50,38 @@ declaration is worth something is register row `EN-4` — two restatements of on
 registry, one naming its authority and one not; **the one that named it stayed
 correct, the one that named nothing drifted on three axes at once.**
 
+## `--floor` — the residue, narrowed to the one place it is CHEAP to close
+
+    spec pointers --floor
+
+An undeclared restatement is indistinguishable from prose **in general**. It is
+not indistinguishable **in a conformance floor**, and a floor is where this
+class has done its damage: a floor row is a list an implementer BUILDS FROM, so
+it carries a rule in short form by construction, and when the authority moves
+the row keeps publishing the superseded version positively.
+
+`ENTITY-CORE-PROTOCOL` §9.1 landed exactly this rule at `0.8.2.31` —
+
+    A row here that restates a rule stated elsewhere NAMES that section as its
+    normative home [MUST].
+
+— and then applied it to the two rows it was investigating.
+`entity-core-keystone` measured the rest and filed it (`F87`, 2026-09-16):
+**8 of 22.** They wrote the scan in fifteen lines and offered it; this is that
+scan, in the module whose docstring already stated the class in the general.
+
+**It is a READER and it NEVER gates, for the same reason `arms` does not.**
+Whether a row RESTATES a rule or is its sole statement is a judgement that
+requires opening the cited section — §9.1 rows do both, and several cite the
+section that genuinely is the only home. A gate here would file accusations
+against correct text at roughly the rate it finds real ones. What a run
+produces is a **worklist with the surface printed beside it**, never a verdict.
+
+⚠ **The count it prints is NOT `8 of 22`.** Keystone's discriminator for *a row
+that asserts a rule* was narrower than this one's, and re-deriving it here gives
+a larger population. **That does not move their finding, and neither number is
+the deliverable** — publish the surface, never the count alone.
+
 ## The mechanism
 
 Same as `sdksync`, whose `normalize`/`digest`/`span_for_anchor` this module
@@ -162,6 +194,115 @@ UNANCHORED_RE = re.compile(
 AUTHORITY_RE = re.compile(
     r"(?:this|the)\s+section\s+is\s+the\s+(?:single\s+)?normative\s+home",
     re.IGNORECASE)
+
+
+# ---------------------------------------------------------------------------
+# `--floor`: undeclared restatements inside a conformance floor.
+# ---------------------------------------------------------------------------
+
+# A floor is a heading, not a filename. `ENTITY-CORE-PROTOCOL` §9.1 is
+# `MUST Implement`; other documents spell theirs `## N. Conformance`. Keyed on
+# the heading text so a document that grows a floor is covered without a list
+# of filenames to keep current — the scope-set-once failure this toolkit has
+# now shipped seven times.
+FLOOR_HEADING = re.compile(
+    r"^#{2,4}\s+.*?(?:(?:MUST|SHOULD|MAY)\s+Implement|Conformance)\b",
+    re.IGNORECASE | re.MULTILINE)
+
+# What makes a row an ASSERTION rather than a feature name.
+#
+# Calibrated against §9.1's live text, both directions. `- Wire framing (§1.6)`
+# names a feature and asserts nothing — it cannot drift, because it says
+# nothing that could stop being true. `- Path validation (§1.4) — no null
+# bytes, no leading slash` states the rule and can.
+#
+# ⚠ A bare `MUST` is NOT sufficient and was the first cut's error: the floor's
+# own heading is "MUST Implement" and several rows read "MUST be safe under"
+# as part of a feature description. The discriminator is a rule's TELL — a
+# normative verb, a wire code, a refusal, a status — not the word MUST.
+#
+# ⚠ **Widened once, on its own first use, and the miss was in the SILENT
+# direction.** The first cut matched `emits?` and missed two §9.1 rows that
+# restate a rule in the passive or with a different verb — *"the **emitted**
+# code is the lowest-numbered failing step's"* and *"bind-to-marker **fires**
+# `modified`, NOT `deleted`"*. Both were found by reading the section the
+# worklist was for. An under-reporting reader is worse than an over-reporting
+# one here: a candidate a human discards costs a lookup, a row that never
+# appears is the defect going unfixed, which is what this whole class is.
+ASSERTS = re.compile(
+    r"\bMUST NOT\b|\[MUST\]|\bnon-?conformant\b|\bemits?\b|\bemitted\b"
+    r"|\bfires?\b|\breject(?:s|ed)?\b|\brefus(?:e|es|ed|al)\b"
+    r"|\b[45]\d\d\s+[`\"]|\bis WITHDRAWN\b|\bnever\b|\bMUST\s+(?:be\s+)?"
+    r"(?:omitted|validated|execute|stay|enforce|resolve|key|run)\b")
+
+# The authority phrases in live use, measured across both corpora rather than
+# invented: the fold that landed the rule wrote six spellings in one commit.
+# `--floor` uses a WIDER net than POINTER_RE on purpose — here a phrase's job
+# is to EXCLUDE a row from the worklist, so missing one manufactures work
+# against correct text, which is the expensive direction for a reader nobody
+# is obliged to act on.
+HAS_AUTHORITY = re.compile(
+    r"normative home|is the authority|\bgoverns\b|§[\d.]+[a-z]?\s+wins"
+    r"|\bRESTATES\b|\brestatement\b|where they differ|defers to"
+    r"|takes precedence|\blives in\b", re.IGNORECASE)
+
+CITES_SECTION = re.compile(r"§\d")
+
+
+def floor_rows(text: str):
+    """(line, row text) for every list item inside a conformance-floor section.
+
+    The unit is a LIST ITEM and it may wrap — `paragraphs()` is wrong here
+    because a floor is one unbroken block of `- ` lines with no blank lines
+    between them, so paragraph-splitting would return the whole floor as a
+    single unit and every row would inherit every other row's authority
+    phrase. **That failure reports a clean floor**, which is the direction
+    this module exists to avoid.
+    """
+    lines = text.splitlines()
+    in_floor = False
+    cur: List[str] = []
+    cur_line = 0
+    out = []
+
+    def flush():
+        if cur:
+            out.append((cur_line, " ".join(cur)))
+
+    for i, ln in enumerate(lines, start=1):
+        if ln.startswith("#"):
+            flush()
+            cur.clear()
+            in_floor = bool(FLOOR_HEADING.match(ln))
+            continue
+        if not in_floor:
+            continue
+        if ln.startswith("- ") or ln.startswith("* "):
+            flush()
+            cur = [ln[2:].strip()]
+            cur_line = i
+        elif cur and ln.strip() and not ln.startswith("#"):
+            cur.append(ln.strip())
+        elif not ln.strip():
+            flush()
+            cur = []
+    flush()
+    return out
+
+
+def floor_candidates(text: str):
+    """Rows that assert a rule, cite a section, and name no authority."""
+    total = asserting = 0
+    out = []
+    for line, row in floor_rows(text):
+        total += 1
+        if not (CITES_SECTION.search(row) and ASSERTS.search(row)):
+            continue
+        asserting += 1
+        if HAS_AUTHORITY.search(row):
+            continue
+        out.append((line, row))
+    return out, total, asserting
 
 
 class CouldNotLook(Exception):
@@ -512,6 +653,56 @@ def run_check(roots: List[Path], ns_roots: List[Path], as_json: bool,
     return (1 if n_error else 0) if gate else 0
 
 
+def run_floor(roots: List[Path], as_json: bool) -> int:
+    """The undeclared-restatement worklist. Reader only; always exits 0."""
+    corpus = _config.corpus_root()
+    docs = list(iter_docs(roots, corpus))
+    if not docs:
+        print("could not look: no documents under %s"
+              % ", ".join(str(r) for r in roots), file=sys.stderr)
+        return 2
+
+    result = {}
+    n_rows = n_assert = n_cand = 0
+    for d in docs:
+        text = d.read_text(encoding="utf-8")
+        cands, total, asserting = floor_candidates(text)
+        if not total:
+            continue
+        r = rel(d, corpus)
+        n_rows += total
+        n_assert += asserting
+        n_cand += len(cands)
+        if cands:
+            result[r] = cands
+
+    if as_json:
+        print(json.dumps({"summary": {"floor_rows": n_rows,
+                                      "asserting": n_assert,
+                                      "candidates": n_cand},
+                          "candidates": {k: [{"line": l, "text": t}
+                                             for l, t in v]
+                                         for k, v in result.items()}},
+                         indent=2))
+        return 0
+
+    for r in sorted(result):
+        print("\n%s  (%d candidate)" % (r, len(result[r])))
+        for line, row in result[r]:
+            print("  %s:%d  %s" % (r, line, row[:150]))
+
+    # THE SURFACE, not the count alone. `asserting` is the denominator the
+    # candidate figure only means anything against, and `floor_rows` is the
+    # denominator THAT only means anything against.
+    print("\n%d floor row(s) across %d document(s) — %d assert a rule and cite "
+          "a section, %d of those name no authority."
+          % (n_rows, len(docs), n_assert, n_cand))
+    print("A CANDIDATE IS NOT A FINDING. Whether a row RESTATES a rule or is "
+          "its sole statement is decided by OPENING the cited section — some "
+          "of these cite the only home there is. Reader only, always exits 0.")
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -529,8 +720,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="pin/re-pin authority spans after reviewing them")
     ap.add_argument("--gate", action="store_true",
                     help="0 clean · 1 findings · 2 could-not-look")
+    ap.add_argument("--floor", action="store_true",
+                    help="UNDECLARED restatements in a conformance floor — a "
+                         "worklist, never a verdict; always exits 0")
     args = ap.parse_args(argv)
     roots = args.root or DEFAULT_ROOTS
+    if args.floor:
+        return run_floor(roots, args.json)
     if args.update:
         return do_update(roots, _config.corpus_root(), args.namespace_root)
     return run_check(roots, args.namespace_root, args.json, args.unpinned,

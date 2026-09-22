@@ -7,7 +7,31 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **`spec disclose` — does a core fold say which conformance cells it crosses?** The
+  enforcement point for `GUIDE-CONFORMANCE` §5.3a: a proposal folding a normative change
+  into the core protocol carries a `Cell disclosure` naming the cells its deltas touch and
+  each one's drive state, read from the conformance anchor's scope table and cited as
+  `(repo, commit, date)`. **An undriven cell does not block a fold; an undisclosed one
+  does.** Four findings: `disclosure-missing`, `disclosure-unsourced`, `disclosure-empty`,
+  `disclosure-state-unknown`.
+
+  It checks the **shape** and never the truth of a state — whether a cell disclosed
+  `driven` really is verifiable only by the party that runs the checks, and the rule says so
+  rather than implying otherwise.
+
+  **Scope is two rules.** A *landed* fold is scoped by the revision it landed as
+  (`--binds-from`, default `0.8.2.32`), so revisions predating the rule are out of scope by
+  the rule rather than by a baseline. A *pending* fold is in scope whatever revision its
+  header currently writes, because the binding line is the head of the spec and anything
+  still to land lands past it — and two live core proposals name only the revision they
+  *correct*, so scoping on the written number alone under-reports in the silent direction.
+
+  Takes `--peer-root` and prints the roots it searched: the proposals for one corpus may be
+  authored in the other, and a run resolving one root grades half the channel. A named root
+  that does not exist is could-not-look, never a silent skip. Validated against the incident
+  that motivated the rule in both directions before publishing a number.
 
 ## [0.8.1] — 2026-08-22
 

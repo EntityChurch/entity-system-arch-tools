@@ -8,6 +8,8 @@
     spec inbound --peers DIR           # where the sibling repos live
     spec inbound --ledger PATH         # this corpus's reconciled view (repeatable)
     spec inbound --trackers            # peer TRACKER files naming this corpus
+    spec inbound --since 2026-09-10    # the RECENT window — what is flowing now
+    spec inbound --since 7d            # same, relative to today
     spec inbound --json
 
 WHAT THIS GATES, AND THE FAILURE IT IS BUILT ON
@@ -59,6 +61,44 @@ WHAT IT DELIBERATELY DOES NOT DO
   reconciled view, and *"I replied once"* is the practice that produced a channel
   nobody could enumerate.
 
+WHY THERE IS A TIME WINDOW, AND WHY IT IS NEVER THE DEFAULT
+
+**The estate carries 1,766 routing packets and writes ~30 a day.** A lifetime
+count over a channel at that rate answers *"has anything ever gone unread"*,
+which nobody can act on, and it drowns the question people actually have: **is
+what is flowing NOW being picked up.** `--since` scopes the report to a window.
+
+Three properties keep it honest, and each is the opposite of what the obvious
+implementation does:
+
+* **The window scopes the REPORT, never the SCAN.** Ambiguity — a `date-letter`
+  citation reaching several packets — is a property of the whole corpus, so it
+  is computed over every packet and then filtered. Filter first and a token
+  reaching two packets, one of them outside the window, reads as resolving.
+* **What the window excluded is PRINTED, every run.** A silent cap reads as
+  "covered everything" when it did not. The out-of-window owed count is stated
+  beside the in-window one, never dropped.
+* **It dates a packet by its OWN id (`ROUTING-YYYY-MM-DD-…`), not by mtime or
+  commit date.** A checkout's mtimes are the clone's, not the packet's, and
+  commit dates do not survive the release boundary ([ADR-0027]) — `census`
+  measured that the hard way when nine of one repo's ten commits carried one
+  date. A packet's date is in its name because the naming convention put it
+  there.
+
+WHY RECIPROCITY IS REPORTED — `ask which seats keep a tracker for YOU`
+
+Filed by `entity-core-keystone` 2026-09-16, who had it filed against them first
+by `entity-system-conformance`: **twelve asks that never arrived, because the
+receiving seat kept no tracker for the sending one.** Their sentence is the
+rule — *"a reconciliation keyed on the trackers you KEEP cannot see the
+counterpart you OMITTED"* — and it is a blind spot no other check in this
+toolkit can reach, because every one of them starts from a file we wrote.
+
+So the run prints both directions: seats keeping a standing index aimed at us
+that we keep none for, and the inverse. **It never gates.** Whether a seat
+warrants a tracker is a judgement about how much traffic it carries, and a gate
+on it would either be permanently red or quietly mandate one file per sibling.
+
 **Reader by default**, on the same reasoning as `pins`, `register` and
 `coverage`: the first run against a live ecosystem scores a backlog, and a gate
 that is red on day one teaches people to skip it.
@@ -69,8 +109,10 @@ Stdlib-only.
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -103,6 +145,47 @@ OWN_TRACKER_GLOB = "TRACKER-*.md"
 
 PACKET_GLOB = "ROUTING-*.md"
 PACKET_DIR = "docs/status"
+
+# ----------------------------------------------------------------------------
+# A DOCUMENT THAT ADDRESSES US IN ITS FILENAME IS INBOUND, WHEREVER IT LIVES
+#
+# `iter_packets` globs `ROUTING-*` under `docs/status`. **Both halves of that
+# scope are assumptions, and measured 2026-09-17 both are wrong for the seat
+# that files the most asks against architecture.**
+#
+# `entity-core-keystone` writes `HANDOFF-TO-ARCH-<date>-<slug>.md` into
+# `research/stewardship/`. Ten of them. Their own standing tracker cites those
+# files as the Packet column for **14 of their 18 open asks** — so the majority
+# of one seat's open set against us has never appeared in any run of this gate,
+# invisible on TWO independent counts, either of which alone is enough: wrong
+# directory AND wrong filename. `entity-core-go` files four more under
+# `docs/validation/reports/`.
+#
+# This is the same class already written down for the meta seat (wrong root AND
+# wrong filename) — third instance — and the generalization is the toolkit's
+# own recurring one: **a scope was set once, when every inbound document was a
+# `ROUTING-*` under `docs/status`, and nothing re-read it when a seat started
+# writing somewhere else.** Nobody was careless: the sending seat named us in
+# the filename, which is a *stronger* addressee signal than the `**To:**` field
+# this gate was built to parse.
+#
+# So discovery is by NAME across the peer's whole tree, pruned. A filename
+# containing `to-<alias>` addresses us — `HANDOFF-TO-ARCH-…`, and nothing else
+# in the live estate matches by accident. Counted in its OWN class and never
+# merged into the packet count, so the packet numbers stay comparable with
+# every measurement this gate has published.
+# ----------------------------------------------------------------------------
+NAME_ADDRESSED_EXT = ".md"
+
+# Build output, vendored copies and publish staging hold byte-copies of real
+# documents. `.publish-staging` alone carries three copies of one browser-rust
+# file under buildset directories. Counting those is the clone defect arriving
+# by a different road.
+PRUNE_DIRS = {
+    ".git", ".hg", "node_modules", "target", "dist", "build", "vendor",
+    ".core-pin", ".venv", "venv", "__pycache__", ".publish-staging",
+    ".verify-generator", ".cache", "_site",
+}
 
 # ----------------------------------------------------------------------------
 # A PEER'S TRACKER ADDRESSED TO US IS AN INBOUND SURFACE, AND THE GLOB MISSED IT
@@ -168,6 +251,74 @@ ALIASES: Dict[str, Tuple[str, ...]] = {
     "entity-system-generator": ("entity-system-generator", "generator"),
 }
 
+# ----------------------------------------------------------------------------
+# A SEAT IS NOT A REPOSITORY, AND THIS GATE ASSUMED IT WAS `[2026-09-17]`
+#
+# `self_name = root.name` resolved ONE identity from the directory name, so a
+# seat that owns several repositories was graded as one of them and the rest of
+# its inbound channel was scored `addressed-elsewhere` — indistinguishable, in
+# every published number, from mail for somebody else.
+#
+# **Measured on the architecture seat, which owns three trees and says so in its
+# own `AGENTS.md`:** run from `entity-system-architecture` the gate reported
+# `0 owed`. Re-run scoped to `entity-core-protocol` — the SAME seat, the same
+# ledger, the same people — **37 packets addressed there, 31 cited, 2 OWED**,
+# both from `entity-core-formalization`, plus a standing
+# `TRACKER-entity-core-protocol.md` carrying **nine open asks** that appeared in
+# no run this gate has ever done. The counterpart had it right: their own
+# tracker opens *"arch owns three trees … One tracker covers all three, because
+# it is one seat."* The gate was the only party that thought otherwise.
+#
+# ⛔ **This is the EIGHTH could-not-look in this toolkit and the third on THIS
+# gate** (`--peers` defaulting to the sibling directory, `LEDGERS` as a
+# one-element tuple, now the identity itself). The generalization has stopped
+# being about flags: **when a scope is derived from a path, ask what the path
+# assumes about the world, and whether that was ever true.** Here it assumed
+# repo == seat, which was true when the gate was written and has not been true
+# since the architecture seat took ownership of the core protocol.
+#
+# Membership is DECLARED, never inferred. A heuristic — shared remote, shared
+# owner file, a naming prefix — would fold `entity-core-{go,rust,py}` into one
+# seat, which is false and would let one seat's ledger discharge another's mail.
+# A repo absent from this table is its own seat, which is the safe default and
+# the state of every seat but one.
+SEAT_REPOS: Dict[str, Tuple[str, ...]] = {
+    # The architecture seat: the optional capability layer, the core protocol
+    # it is upstream of, and the toolkit that gates both. One team, one
+    # `docs/COHORT-OPEN-ITEMS.md`.
+    "entity-system-architecture": ("entity-system-architecture",
+                                   "entity-core-protocol",
+                                   "entity-system-arch-tools"),
+}
+
+
+def seat_repos(name: str) -> Tuple[str, ...]:
+    """Every repository that is the same SEAT as `name`, including itself.
+
+    Symmetric by construction: running the gate from any member resolves the
+    same set, so `--root ../entity-core-protocol` and `--root .` grade the same
+    channel against the same ledger rather than two different halves of one.
+    """
+    for members in SEAT_REPOS.values():
+        if name in members:
+            return members
+    return (name,)
+
+
+def seat_aliases(members: Tuple[str, ...]) -> Tuple[str, ...]:
+    """Every spelling that addresses this seat, across all its repositories.
+
+    Order-preserving and de-duplicated. A repo with no alias entry contributes
+    its own directory name, so a newly-added seat member is addressable by its
+    formal name on day one rather than silently unmatched.
+    """
+    out: List[str] = []
+    for m in members:
+        for a in ALIASES.get(m, (m,)):
+            if a not in out:
+                out.append(a)
+    return tuple(out)
+
 # `**To:** X · **From:** Y` puts both on one line, so the value terminates at
 # the next bold marker, never at the end of the line.
 TO_FIELD = re.compile(r"\*\*\s*(?:To|TO|to)\s*:?\s*\*\*\s*([^\n]*)")
@@ -227,8 +378,14 @@ def names_us(value: str, aliases: Tuple[str, ...]) -> bool:
     return False
 
 
-def classify(text: str, aliases: Tuple[str, ...]) -> str:
-    """`to` · `cc` · `other` · `unaddressed` — and the last is not `other`."""
+def addressee_clauses(text: str) -> Tuple[Optional[str], List[str]]:
+    """The `To:` value with cc stripped out of it, and the cc values.
+
+    **One implementation, two callers.** `classify` decides to/cc/other and
+    `addressed_as` decides WHICH of our repos was named; both have to strip cc
+    from the `To:` value the same way, and two copies of that rule is how the
+    breakdown ends up disagreeing with the count it breaks down.
+    """
     to = field_value(text, TO_FIELD)
 
     cc_parts: List[str] = []
@@ -238,14 +395,23 @@ def classify(text: str, aliases: Tuple[str, ...]) -> str:
     for m in CC_INLINE.finditer(text[:4000]):
         cc_parts.append(m.group(1) or m.group(2) or m.group(3) or "")
 
-    if to is not None:
-        # A cc clause living inside the To: value must not make the packet read
-        # as addressed to us — strip what we recognised as cc before testing.
-        primary = to
-        for c in cc_parts:
-            if c and c in primary:
-                primary = primary.replace(c, " ")
-        primary = CC_INLINE.sub(" ", primary)
+    if to is None:
+        return None, cc_parts
+
+    # A cc clause living inside the To: value must not make the packet read
+    # as addressed to us — strip what we recognised as cc before testing.
+    primary = to
+    for c in cc_parts:
+        if c and c in primary:
+            primary = primary.replace(c, " ")
+    return CC_INLINE.sub(" ", primary), cc_parts
+
+
+def classify(text: str, aliases: Tuple[str, ...]) -> str:
+    """`to` · `cc` · `other` · `unaddressed` — and the last is not `other`."""
+    primary, cc_parts = addressee_clauses(text)
+
+    if primary is not None:
         if names_us(primary, aliases):
             return "to"
         if any(names_us(c, aliases) for c in cc_parts if c):
@@ -259,6 +425,63 @@ def classify(text: str, aliases: Tuple[str, ...]) -> str:
 
 def stem_of(name: str) -> str:
     return name[:-3] if name.endswith(".md") else name
+
+
+# A packet's date is in its own id. Not its mtime (that is the clone's), not its
+# commit date (that does not survive the release boundary — [ADR-0027], and
+# `census` measured nine of one repo's ten commits carrying a single date).
+PACKET_DATE = re.compile(r"^ROUTING-(\d{4}-\d{2}-\d{2})")
+
+RELATIVE_WINDOW = re.compile(r"^(\d+)d$")
+
+
+def packet_date(name: str) -> Optional[str]:
+    """`ROUTING-2026-09-16-h-…` -> `2026-09-16`, or None if it carries no date.
+
+    **None is UNKNOWN, never old.** A packet whose name does not carry a parsable
+    date cannot be placed in or out of a window, so it is reported in its own
+    line rather than being silently dropped out of a recency view — the same
+    asymmetry `unaddressed` exists for. Dropping it would be the cheaper code
+    and would hide exactly the packets whose naming is already irregular.
+    """
+    m = PACKET_DATE.match(name)
+    return m.group(1) if m else None
+
+
+ANY_DATE = re.compile(r"(\d{4}-\d{2}-\d{2})")
+
+
+def doc_date(name: str) -> Optional[str]:
+    """A date from anywhere in the filename — for documents that are not
+    `ROUTING-*` and so carry no anchored date position.
+
+    `packet_date` stays anchored deliberately: for a packet the date IS the
+    start of the id, and a loose search there would date
+    `ROUTING-…-the-0.8.2.19-fold-2026-01-01-regression` from its slug.
+    """
+    anchored = packet_date(name)
+    if anchored:
+        return anchored
+    m = ANY_DATE.search(name)
+    return m.group(1) if m else None
+
+
+def resolve_since(value: str) -> str:
+    """`2026-09-10` or `7d` -> an ISO date string.
+
+    The relative form is resolved against today at parse time and the ABSOLUTE
+    result is what the report prints, so a run is quotable: `--since 7d` in a
+    handoff means nothing a week later, `since 2026-09-10` still does.
+    """
+    m = RELATIVE_WINDOW.match(value.strip())
+    if m:
+        d = _dt.date.today() - _dt.timedelta(days=int(m.group(1)))
+        return d.isoformat()
+    try:
+        return _dt.date.fromisoformat(value.strip()).isoformat()
+    except ValueError:
+        raise ValueError(
+            "--since takes YYYY-MM-DD or Nd (e.g. 7d), not %r" % value)
 
 
 # How a ledger actually cites a packet, measured rather than assumed:
@@ -326,10 +549,10 @@ def citing_tokens(stem: str, tokens: List[str]) -> List[str]:
     return [t for t in tokens if stem == t or stem.startswith(t + "-")]
 
 
-def iter_packets(peers: Path, self_name: str) -> List[Path]:
+def iter_packets(peers: Path, self_names: Tuple[str, ...]) -> List[Path]:
     found: List[Path] = []
     for repo in sorted(p for p in peers.iterdir() if p.is_dir()):
-        if repo.name == self_name or repo.name.startswith("."):
+        if repo.name in self_names or repo.name.startswith("."):
             continue
         d = repo / PACKET_DIR
         if not d.is_dir():
@@ -338,7 +561,7 @@ def iter_packets(peers: Path, self_name: str) -> List[Path]:
     return found
 
 
-def peer_trackers(peers: Path, self_name: str,
+def peer_trackers(peers: Path, self_names: Tuple[str, ...],
                   aliases: Tuple[str, ...]) -> List[Path]:
     """A sibling's `docs/status/TRACKER-<us>.md` — a standing index aimed at us.
 
@@ -349,7 +572,7 @@ def peer_trackers(peers: Path, self_name: str,
     """
     found: List[Path] = []
     for repo in sorted(pp for pp in peers.iterdir() if pp.is_dir()):
-        if repo.name == self_name or repo.name.startswith("."):
+        if repo.name in self_names or repo.name.startswith("."):
             continue
         d = repo / PACKET_DIR
         if not d.is_dir():
@@ -363,7 +586,121 @@ def peer_trackers(peers: Path, self_name: str,
     return found
 
 
-def dedupe_clones(packets: List[Path]) -> Tuple[List[Path], List[dict]]:
+def iter_name_addressed(peers: Path, self_names: Tuple[str, ...],
+                        aliases: Tuple[str, ...]) -> List[Path]:
+    """Documents naming US in their FILENAME, anywhere in a peer's tree.
+
+    `HANDOFF-TO-ARCH-2026-09-08-…md`. See the PRUNE_DIRS block for why this
+    exists and what it measured.
+
+    **`ROUTING-*` and `TRACKER-*` are excluded here**, not because they are not
+    inbound, but because they are counted by their own passes and a document
+    must not be two obligations. `ROUTING-…-to-arch-…` is the overwhelmingly
+    common spelling and would otherwise double every packet in the estate.
+
+    The match requires a `to-<alias>` token with a separator in front of it, so
+    `…-into-architecture-notes.md` does not fire and neither does a bare alias
+    appearing anywhere in a slug. That is deliberately narrow: this class is
+    reported as a delivery event, and over-reporting one costs a seat a
+    re-read of something never sent to them.
+    """
+    pats = [re.compile(r"(?:^|[-_.])to[-_]%s(?:[-_.]|$)" % re.escape(a), re.I)
+            for a in aliases]
+    found: List[Path] = []
+    for repo in sorted(p for p in peers.iterdir() if p.is_dir()):
+        if repo.name in self_names or repo.name.startswith("."):
+            continue
+        for dirpath, dirnames, filenames in os.walk(repo):
+            dirnames[:] = [d for d in dirnames
+                           if d not in PRUNE_DIRS and not d.startswith(".")]
+            for fn in filenames:
+                if not fn.endswith(NAME_ADDRESSED_EXT):
+                    continue
+                if fn.startswith("ROUTING-") or fn.startswith("TRACKER-"):
+                    continue
+                if any(p.search(fn) for p in pats):
+                    found.append(Path(dirpath) / fn)
+    return sorted(found)
+
+
+def own_tracker_seats(root: Path, peers: Path,
+                      self_names: Tuple[str, ...]) -> List[str]:
+    """Seats THIS corpus keeps a `docs/status/TRACKER-<seat>.md` for.
+
+    Filtered to names that are actually sibling repositories, because a tracker
+    file may legitimately track a *subject* rather than a seat — this corpus
+    carries `TRACKER-THE-EXCHANGE-AND-COMPOSITION-ARC.md` — and counting those
+    as counterparts would report reciprocity we do not have.
+    """
+    siblings = {p.name for p in peers.iterdir() if p.is_dir()}
+    d = root / PACKET_DIR
+    if not d.is_dir():
+        return []
+    seats = []
+    for f in sorted(d.glob(OWN_TRACKER_GLOB)):
+        subject = f.stem[len("TRACKER-"):]
+        # A tracker naming one of our OWN seat repositories is not a
+        # counterpart — it would report reciprocity with ourselves.
+        if subject in siblings and subject not in self_names:
+            seats.append(subject)
+    return seats
+
+
+def addressed_as(text: str, self_names: Tuple[str, ...]) -> List[str]:
+    """WHICH of our repositories a packet's addressee clause named.
+
+    **Reported so the count is falsifiable by inspection.** `305 addressed here`
+    is a number nobody can check; `entity-system-architecture 268 ·
+    entity-core-protocol 37` is a table a reader can disagree with — and it is
+    the breakdown that makes a multi-repo seat's second channel visible at all,
+    which is the whole defect this exists for.
+
+    A packet may name more than one of ours; all matches are returned, so the
+    breakdown can legitimately exceed the total it describes. That overlap is
+    REPORTED rather than resolved — silently picking one repo would invent a
+    precision the packet does not have.
+
+    A packet that only `cc`s us has no repo attribution and is keyed `(cc)`.
+    **It is not `unattributed`**: the first cut labelled it that way and the
+    live run published `unattributed 30` for thirty packets whose addressee was
+    perfectly parseable and simply was not us. A bucket named for the wrong
+    cause is worse than no bucket.
+    """
+    primary, cc_parts = addressee_clauses(text)
+    if primary is not None:
+        hits = [m for m in self_names
+                if names_us(primary, ALIASES.get(m, (m,)))]
+        if hits:
+            return hits
+    if any(names_us(c, self_aliases_all(self_names)) for c in cc_parts if c):
+        return ["(cc)"]
+    return ["(unparsed)"]
+
+
+def self_aliases_all(self_names: Tuple[str, ...]) -> Tuple[str, ...]:
+    return seat_aliases(self_names)
+
+
+def seat_of(p: Path, peers: Optional[Path] = None) -> str:
+    """Which repository holds this file.
+
+    `parents[2]` is right only for `<repo>/docs/status/FILE.md` and is wrong
+    the moment a seat files somewhere deeper — `entity-core-go` writes into
+    `docs/validation/reports/`, where `parents[2]` is the string `docs`. When
+    the peer root is known, take the first path segment under it instead.
+    """
+    if peers is not None:
+        try:
+            return p.resolve().relative_to(peers).parts[0]
+        except ValueError:
+            pass
+    return p.parents[2].name
+
+
+def dedupe_clones(packets: List[Path],
+                  weights: Optional[Dict[str, int]] = None,
+                  peers: Optional[Path] = None
+                  ) -> Tuple[List[Path], List[dict]]:
     """Collapse byte-identical packets held by working clones of one repository.
 
     **A packet is ONE obligation however many checkouts hold it.** This scope is
@@ -382,9 +719,21 @@ def dedupe_clones(packets: List[Path]) -> Tuple[List[Path], List[dict]]:
     Deduping only ever LOWERS an accusation, which is the direction an
     instrument reporting on five seats at once has to be wrong in.
     """
-    per_dir: Dict[str, int] = {}
+    # **`weights` is which directory is LIVE, and it must be measured over the
+    # fullest population available — not over the handful of files being
+    # deduped.** Caught on the first run of the name-addressed pass: three
+    # copies of one browser-rust document, one each in the live tree and two
+    # clones, ranked by name-addressed count alone. Every directory scored 1,
+    # the tie broke on the name, and the obligation was attributed to
+    # `entity-browser-rust-vm` — a clone — instead of `entity-browser-rust`.
+    # A misattributed obligation is worse than a duplicated one: it names a
+    # seat that cannot act on it.
+    per_dir = dict(weights) if weights is not None else {}
     for p in packets:
-        per_dir[p.parents[2].name] = per_dir.get(p.parents[2].name, 0) + 1
+        seat = seat_of(p, peers)
+        per_dir.setdefault(seat, 0)
+        if weights is None:
+            per_dir[seat] += 1
 
     # **The key is FILENAME + content digest, and the filename half is not
     # decoration.** A first cut keyed on content alone and collapsed two
@@ -403,29 +752,31 @@ def dedupe_clones(packets: List[Path]) -> Tuple[List[Path], List[dict]]:
     canonical: List[Path] = []
     collapsed: List[dict] = []
     for _key, group in groups.items():
-        best = max(group, key=lambda q: (per_dir[q.parents[2].name],
-                                         q.parents[2].name))
+        best = max(group, key=lambda q: (per_dir.get(seat_of(q, peers), 0),
+                                         seat_of(q, peers)))
         canonical.append(best)
         for other in group:
             if other != best:
                 collapsed.append({"file": str(other),
-                                  "seat": other.parents[2].name,
+                                  "seat": seat_of(other, peers),
                                   "same_as": str(best)})
     canonical.sort()
     return canonical, collapsed
 
 
 def scan(root: Path, peers: Optional[Path] = None,
-         ledgers: Optional[List[str]] = None) -> Tuple[int, dict]:
+         ledgers: Optional[List[str]] = None,
+         since: Optional[str] = None) -> Tuple[int, dict]:
     root = root.resolve()
     self_name = root.name
-    aliases = ALIASES.get(self_name)
-    if aliases is None:
+    self_names = seat_repos(self_name)
+    if self_name not in ALIASES and len(self_names) == 1:
         return CANNOT_LOOK, {
             "error": "no addressee aliases known for %r — this gate cannot "
                      "tell what 'addressed to us' means for this corpus, "
                      "which is a could-not-look and not a clean channel"
                      % self_name}
+    aliases = seat_aliases(self_names)
 
     if peers is None:
         peers = root.parent
@@ -439,9 +790,29 @@ def scan(root: Path, peers: Optional[Path] = None,
     # Explicit `--ledger` wins outright. Otherwise the default path, PLUS the
     # own-tree per-counterpart trackers — a seat that keeps only trackers has a
     # ledger, and reporting it as could-not-look was the defect.
+    # A seat's reconciled view lives in ONE of its repositories, not in each of
+    # them. The architecture seat's ledger is in `entity-system-architecture`
+    # and `entity-core-protocol` holds none — so resolving the default against
+    # `root` alone made `--root ../entity-core-protocol` a could-not-look for a
+    # seat that has a perfectly good ledger one directory over.
+    seat_roots: List[Path] = [root]
+    for m in self_names:
+        if m == self_name:
+            continue
+        sibling = peers / m
+        if sibling.is_dir():
+            seat_roots.append(sibling.resolve())
+
+    def ledger_path(rel: str) -> Optional[Path]:
+        for base in seat_roots:
+            p = base / rel
+            if p.is_file():
+                return p
+        return None
+
     explicit = bool(ledgers)
     candidates: List[str] = list(ledgers) if ledgers else list(LEDGERS)
-    if not explicit and not any((root / rel).is_file() for rel in candidates):
+    if not explicit and not any(ledger_path(rel) for rel in candidates):
         # FALLBACK ONLY, and the "only" is the whole safety argument.
         #
         # The defect was COULD-NOT-LOOK for a seat with no file at the default
@@ -450,16 +821,20 @@ def scan(root: Path, peers: Optional[Path] = None,
         # the dangerous direction: a spurious row is read once and dismissed, a
         # packet that never appears is the failure this gate exists to prevent.
         # So trackers stand in for a missing ledger; they never supplement one.
-        own = root / PACKET_DIR
-        if own.is_dir():
-            candidates = ["%s/%s" % (PACKET_DIR, f.name)
-                          for f in sorted(own.glob(OWN_TRACKER_GLOB))]
+        fallback: List[str] = []
+        for base in seat_roots:
+            own = base / PACKET_DIR
+            if own.is_dir():
+                fallback.extend("%s/%s" % (PACKET_DIR, f.name)
+                                for f in sorted(own.glob(OWN_TRACKER_GLOB)))
+        if fallback:
+            candidates = sorted(set(fallback))
 
     ledger_text = ""
     seen_ledger = []
     for rel in candidates:
-        p = root / rel
-        if p.is_file():
+        p = ledger_path(rel)
+        if p is not None:
             try:
                 ledger_text += p.read_text(encoding="utf-8", errors="ignore")
                 seen_ledger.append(rel)
@@ -473,12 +848,12 @@ def scan(root: Path, peers: Optional[Path] = None,
                      "missing default is not an empty inbox"
                      % (", ".join(candidates), root)}
 
-    trackers = peer_trackers(peers, self_name, aliases)
+    trackers = peer_trackers(peers, self_names, aliases)
     tracker_recs = [{"file": str(t), "seat": t.parents[2].name}
                     for t in trackers]
 
-    packets = iter_packets(peers, self_name)
-    packets, collapsed = dedupe_clones(packets)
+    packets = iter_packets(peers, self_names)
+    packets, collapsed = dedupe_clones(packets, None, peers)
     if not packets:
         return CANNOT_LOOK, {
             "error": "no %s found under any sibling's %s below %s — the scope "
@@ -526,7 +901,9 @@ def scan(root: Path, peers: Optional[Path] = None,
 
         seat = p.parents[2].name
         stem = stem_of(p.name)
-        rec = {"file": str(p), "seat": seat, "stem": stem, "kind": kind}
+        rec = {"file": str(p), "seat": seat, "stem": stem, "kind": kind,
+               "date": packet_date(p.name),
+               "addressed_as": addressed_as(text, self_names)}
         if kind == "unaddressed":
             unaddressed.append(rec)
             continue
@@ -551,19 +928,123 @@ def scan(root: Path, peers: Optional[Path] = None,
     for rec, hits in staged:
         resolving = [t for t in hits if len(reach[t]) == 1]
         if resolving:
-            cited.append(rec["file"])
+            cited.append(rec)
             continue
         if hits:
             ambiguous_credit.append(dict(rec, cited_by=sorted(hits)))
             continue
         if rec["kind"] == "to":
             owed.append(rec)
-            by_seat[rec["seat"]] = by_seat.get(rec["seat"], 0) + 1
         else:
             cc_owed.append(rec)
 
     ambiguous = [{"citation": t, "matches": v}
                  for t, v in sorted(reach.items()) if len(v) > 1]
+
+    # ------------------------------------------------------------------
+    # THE WINDOW SCOPES THE REPORT AND NOT THE SCAN, and it is applied HERE
+    # — after `reach` is built over every packet in the estate. Filtering
+    # earlier would make a `date-letter` token reaching two packets, one of
+    # them outside the window, read as resolving, and silently discharge the
+    # one nobody looked at. That is the exact defect this gate shipped in
+    # 2026-09-11 (a token discharging five packets while printing "-> 5
+    # packets" in its own summary), reintroduced one feature later.
+    #
+    # `undated` is its OWN bucket and never falls out. A packet whose name
+    # carries no parsable date cannot be placed in or out of a window, and a
+    # recency view that quietly drops it hides exactly the packets whose
+    # naming is already irregular — UNKNOWN, never old.
+    # ------------------------------------------------------------------
+    def in_window(rec: dict) -> bool:
+        return since is None or (rec["date"] or "") >= since
+
+    excluded = {}
+    undated = {}
+    if since is not None:
+        for label, bucket in (("owed", owed), ("cited", cited),
+                              ("cc_owed", cc_owed),
+                              ("unaddressed", unaddressed),
+                              ("ambiguous_credit", ambiguous_credit)):
+            excluded[label] = sum(
+                1 for r in bucket if r["date"] and r["date"] < since)
+            undated[label] = sum(1 for r in bucket if not r["date"])
+        owed = [r for r in owed if in_window(r) or not r["date"]]
+        cited = [r for r in cited if in_window(r) or not r["date"]]
+        cc_owed = [r for r in cc_owed if in_window(r) or not r["date"]]
+        unaddressed = [r for r in unaddressed
+                       if in_window(r) or not r["date"]]
+        ambiguous_credit = [r for r in ambiguous_credit
+                            if in_window(r) or not r["date"]]
+
+    for rec in owed:
+        by_seat[rec["seat"]] = by_seat.get(rec["seat"], 0) + 1
+
+    # The addressed-to-us total, broken down by WHICH of our repositories the
+    # clause named. **Computed HERE — after the window filter — over the same
+    # three buckets `addressed_to_us` sums**, so the table and the number it
+    # breaks down cannot disagree. Computing it before the filter was the first
+    # cut and it would have published a breakdown larger than its own total on
+    # every `--since` run.
+    #
+    # ⚠ **The breakdown can EXCEED the total and that is not a bug** — a packet
+    # naming two of our repositories is one obligation attributed twice. The
+    # overlap is computed and printed rather than hidden, because a table that
+    # silently fails to sum is the thing that makes a reader stop trusting the
+    # number it breaks down. First cut asserted the sum and the assertion only
+    # passed because no fixture had a multi-match packet; live, it was 316
+    # against a total of 308.
+    addressed_by_repo: Dict[str, int] = {}
+    multi_named = 0
+    for rec in owed + cited + ambiguous_credit:
+        named = rec.get("addressed_as") or ["(unparsed)"]
+        if len([m for m in named if m in self_names]) > 1:
+            multi_named += 1
+        for m in named:
+            addressed_by_repo[m] = addressed_by_repo.get(m, 0) + 1
+
+    # ------------------------------------------------------------------
+    # NAME-ADDRESSED DOCUMENTS — `HANDOFF-TO-ARCH-…`, anywhere in the tree.
+    #
+    # Its own class, and it does NOT gate today. Not timidity: this is a
+    # population nobody has ever reconciled, so gating it turns the run red
+    # on introduction, which is how a gate teaches people to skip it. The
+    # count is printed with the reason. When the backlog is worked it
+    # becomes an `owed` bucket like any other.
+    #
+    # Dedupe against the packet set by (name, digest) too — a `HANDOFF-TO-`
+    # under a working clone is one obligation, same as a packet.
+    # ------------------------------------------------------------------
+    named = iter_name_addressed(peers, self_names, aliases)
+    # Weighted by the PACKET census, which is the measure of which directory is
+    # the live tree — see the comment in `dedupe_clones`.
+    packet_weights: Dict[str, int] = {}
+    for p in packets:
+        s = seat_of(p, peers)
+        packet_weights[s] = packet_weights.get(s, 0) + 1
+    named, _named_clones = (dedupe_clones(named, packet_weights, peers)
+                            if named else ([], []))
+    name_addressed = []
+    for p in named:
+        stem = stem_of(p.name)
+        # **The FULL stem, and nothing shorter.** These names carry no
+        # `date-letter` short form, so there is no vocabulary to calibrate
+        # against here — and for an inbox gate the safe direction is to
+        # report a document nobody has cited precisely, never to credit one
+        # on a partial match. Under-crediting costs a re-read; over-crediting
+        # is the failure this gate exists to prevent.
+        rec = {"file": str(p), "seat": seat_of(p, peers),
+               "stem": stem, "date": doc_date(p.name),
+               "cited": stem in ledger_text}
+        if since is None or not rec["date"] or rec["date"] >= since:
+            name_addressed.append(rec)
+
+    # Reciprocity — the one blind spot no check starting from a file WE wrote
+    # can reach. See the module docstring.
+    keep_for_us = sorted({t["seat"] for t in tracker_recs})
+    we_keep = own_tracker_seats(root, peers, self_names)
+    flow = {}
+    for rec in owed + cited + cc_owed + ambiguous_credit:
+        flow[rec["seat"]] = flow.get(rec["seat"], 0) + 1
 
     res = {
         "root": str(root),
@@ -574,6 +1055,14 @@ def scan(root: Path, peers: Optional[Path] = None,
         "clone_seats": sorted({c["seat"] for c in collapsed}),
         "addressed_to_us": len(owed) + len(cited) + len(ambiguous_credit),
         "cited": len(cited),
+        # WHICH of this seat's repositories the channel actually named. One
+        # entry when the seat is one repo, which is every seat but arch.
+        "seat_repos": list(self_names),
+        "addressed_by_repo": addressed_by_repo,
+        "addressed_multi_named": multi_named,
+        "since": since,
+        "excluded_by_window": excluded,
+        "undated": undated,
         "owed": owed,
         "cc_owed": cc_owed,
         "unaddressed": unaddressed,
@@ -584,6 +1073,19 @@ def scan(root: Path, peers: Optional[Path] = None,
         # A standing index a peer keeps aimed at us. Reported, never merged:
         # a tracker is not a delivery event and must not discharge one.
         "peer_trackers": tracker_recs,
+        "tracker_reciprocity": {
+            "they_keep_for_us": keep_for_us,
+            "we_keep_for_them": we_keep,
+            # The finding keystone named: a seat aiming a standing index at us
+            # that we hold no counterpart for. Their own twelve-ask incident.
+            "not_reciprocated": [s for s in keep_for_us if s not in we_keep],
+            # The inverse is informational, not a defect: arch keeps trackers
+            # for the core tier precisely BECAUSE it does not correspond with
+            # two of those seats directly.
+            "ours_only": [s for s in we_keep if s not in keep_for_us],
+        },
+        "flow_by_seat": flow,
+        "name_addressed": name_addressed,
         "ledger_default_used": not explicit,
     }
     return (VIOLATIONS if owed else CLEAN), res
@@ -607,12 +1109,59 @@ def report(res: dict, gate: bool, owed_only: bool, unaddressed_only: bool,
             print(t["file"])
         return
 
-    for seat in sorted(res["by_seat"], key=lambda k: -res["by_seat"][k]):
-        print("  %-32s %4d owed" % (seat, res["by_seat"][seat]))
+    if res.get("since"):
+        print("  %-32s %4s %6s   (window: packets dated >= %s)"
+              % ("seat", "owed", "flow", res["since"]))
+        for seat in sorted(res["flow_by_seat"],
+                           key=lambda k: -res["flow_by_seat"][k]):
+            print("  %-32s %4d %6d" % (seat, res["by_seat"].get(seat, 0),
+                                       res["flow_by_seat"][seat]))
+    else:
+        for seat in sorted(res["by_seat"], key=lambda k: -res["by_seat"][k]):
+            print("  %-32s %4d owed" % (seat, res["by_seat"][seat]))
     print("\n%d routing packet(s) under %s — %d addressed here, %d already on "
           "the ledger, %d owed."
           % (res["scanned"], res["peers"], res["addressed_to_us"],
              res["cited"], len(res["owed"])))
+    # A SEAT IS NOT A REPOSITORY. Printed only when this one spans several, and
+    # printed as a breakdown rather than a total, because `305 addressed here`
+    # is a number nobody can check and a per-repo table is one a reader can
+    # disagree with. This seat's second channel was invisible for as long as
+    # the identity was `root.name`.
+    if len(res.get("seat_repos", [])) > 1:
+        bd = res.get("addressed_by_repo", {})
+        line = ("SEAT: this corpus is one seat across %d repositories (%s) — "
+                "they share this ledger, so mail to any of them is mail to "
+                "us. Attribution: %s."
+                % (len(res["seat_repos"]), ", ".join(res["seat_repos"]),
+                   " · ".join("%s %d" % (k, v) for k, v in
+                              sorted(bd.items(), key=lambda kv: -kv[1]))))
+        # The attribution is per-NAMING and the total is per-PACKET, so state
+        # the difference instead of leaving a reader to find that a published
+        # table does not add up. `(cc)` is a packet copying us with no repo of
+        # ours in its `To:`; `(unparsed)` is one we cannot attribute at all.
+        extra = sum(bd.values()) - res["addressed_to_us"]
+        if extra:
+            line += (" ⚠ that is %d attributions over %d packets — %d packet(s)"
+                     " name more than one of our repositories and are counted"
+                     " once per name."
+                     % (sum(bd.values()), res["addressed_to_us"],
+                        res.get("addressed_multi_named", 0)))
+        print(line)
+    if res.get("since"):
+        ex = res["excluded_by_window"]
+        print("WINDOW: dated >= %s. The counts above are the WINDOW, not the "
+              "channel — %d owed, %d cited, %d cc, %d unaddressed and %d "
+              "ambiguous packet(s) are older and are NOT reported above. A "
+              "window is a reading order, never a discharge."
+              % (res["since"], ex.get("owed", 0), ex.get("cited", 0),
+                 ex.get("cc_owed", 0), ex.get("unaddressed", 0),
+                 ex.get("ambiguous_credit", 0)))
+        nd = sum(res.get("undated", {}).values())
+        if nd:
+            print("%d packet(s) carry no parsable date in their filename and "
+                  "are reported IN the window regardless — undated is UNKNOWN, "
+                  "never old." % nd)
     if res["collapsed_clones"]:
         print("%d further file(s) are byte-identical copies of a packet already "
               "counted, held by working clones of the same repository (%s) — a "
@@ -631,6 +1180,33 @@ def report(res: dict, gate: bool, owed_only: bool, unaddressed_only: bool,
               % (len(res["peer_trackers"]), ", ".join(seats)))
         for t in res["peer_trackers"]:
             print("    %s" % t["file"])
+    na = res.get("name_addressed") or []
+    if na:
+        uncited = [r for r in na if not r["cited"]]
+        seats = sorted({r["seat"] for r in na})
+        print("%d document(s) address this corpus IN THEIR FILENAME and are "
+              "not ROUTING packets (%s) — %d of them are cited nowhere in the "
+              "reconciled view. A seat that writes `HANDOFF-TO-US-….md` into "
+              "its own research directory has addressed us more explicitly "
+              "than a **To:** field does. Counted separately and NOT gated "
+              "yet: this population has never been reconciled, and a gate red "
+              "on introduction is one people switch off."
+              % (len(na), ", ".join(seats), len(uncited)))
+        for r in uncited:
+            print("    [uncited] %s" % r["file"])
+    rec = res.get("tracker_reciprocity") or {}
+    if rec.get("not_reciprocated"):
+        print("⚠ %d seat(s) keep a standing index aimed at US and we keep none "
+              "for them: %s. A reconciliation keyed on the trackers you KEEP "
+              "cannot see the counterpart you OMITTED — an absent row in an "
+              "absent table. Reported, never gated: whether a seat warrants a "
+              "tracker is a judgement about traffic."
+              % (len(rec["not_reciprocated"]),
+                 ", ".join(rec["not_reciprocated"])))
+    if rec.get("ours_only"):
+        print("  (we keep one for %s who keep none for us — not a defect: a "
+              "tracker is also how a seat we do not correspond with directly "
+              "gets its worklist written down.)" % ", ".join(rec["ours_only"]))
     if res["unaddressed"]:
         print("%d packet(s) name no recipient this gate can parse. That is "
               "UNKNOWN, never 'not ours' — read them or give them a **To:** "
@@ -678,8 +1254,21 @@ def main(argv: Optional[List[str]] = None) -> int:
                          "this tree's own docs/status/TRACKER-*.md")
     ap.add_argument("--trackers", action="store_true",
                     help="print only the peer TRACKER files naming this corpus")
+    ap.add_argument("--since", default=None, metavar="DATE",
+                    help="scope the REPORT to packets dated on or after DATE "
+                         "(YYYY-MM-DD, or Nd for N days back). The scan still "
+                         "covers everything; what the window excluded is "
+                         "printed rather than dropped")
     ap.add_argument("--json", action="store_true", help="emit JSON")
     args = ap.parse_args(argv)
+
+    since = None
+    if args.since is not None:
+        try:
+            since = resolve_since(args.since)
+        except ValueError as exc:
+            print("could not look: %s" % exc, file=sys.stderr)
+            return CANNOT_LOOK
 
     root = args.root
     if root is None:
@@ -689,7 +1278,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         except Exception:  # noqa: BLE001
             root = Path.cwd()
 
-    code, res = scan(Path(root), args.peers, args.ledger)
+    code, res = scan(Path(root), args.peers, args.ledger, since)
     if args.json:
         print(json.dumps(res, indent=1))
     else:
