@@ -77,11 +77,67 @@ import config as _config  # sibling in tools/spec/
 # that exclusion now lives in config exclude_files.
 _CFG = _config.load()
 _SCOPE = _CFG.scope("core-specs-strict")
+DEFAULT_SCOPE = "core-specs-strict"
 DEFAULT_ROOT = _SCOPE.root
 EXCLUDE_DIRS = _SCOPE.exclude_dirs
 EXCLUDE_FILES = _SCOPE.exclude_files
 
 CANONICAL_STATUS = _CFG.canonical_status
+
+# ---- the narrative rules, and why they have a second scope ------------------
+# Five rules here are not about spec structure at all. They catch **process
+# narrative fossilized into a document a stranger will read**: a seat name, a
+# date, a proposal citation, an amendment's provenance, a document-history
+# section. Their subject is the PUBLISHED SURFACE, not `specs/`.
+#
+# For most of this tool's life those two were the same thing, so binding them to
+# `core-specs-strict` was right. They stopped being the same thing when this
+# corpus declared `[[keep_tree]]` over `docs/proposals` and
+# `docs/research/explorations` — **169 documents that publish and that no
+# narrative rule has ever read.** Measured 2026-09-07, by hand, in the tree
+# those rules were built for: operator quotations in 18 of them, seat names in
+# 106, internal discipline-letter references in 93.
+#
+# So the fix is a second SCOPE, not a second tool. The structural rules
+# (`header-version-*`, `depends-missing`, `title-not-h1`) are meaningless over an
+# exploration and would bury the signal, so a narrative scope runs the narrative
+# rules and nothing else.
+NARRATIVE_RULES = frozenset({
+    "impl-team-ref", "date-in-body", "proposal-citation",
+    "amendment-provenance", "document-history-section",
+})
+
+# ---- what actually leaks out of a published PROPOSAL, which is not the same set
+# The five above were written for normative specs, and three of them are simply
+# wrong over a proposal: a proposal is a dated document that cites other
+# proposals and carries its own history. Firing those would bury the signal in
+# noise the author is right to have written.
+#
+# What does leak, measured by hand over the 169 published proposal and
+# exploration documents on 2026-09-07:
+#
+#   seat names                     106 documents
+#   internal discipline letters      93
+#   operator quotations              18
+#   internal repo / tree paths        a handful, and the worst kind
+#
+# Only the first had a rule, and that rule was scoped away. The other three had
+# nothing at all — which is why this is a scope fix AND three new rules, not a
+# scope fix alone.
+PUBLISHED_LEAK_RULES = frozenset({
+    "impl-team-ref", "operator-quote", "internal-path-ref",
+    "discipline-letter-ref",
+})
+
+# scope name -> the rule subset it scores. A scope not listed runs the full rule
+# table, which is the historical behaviour for `core-specs-strict`.
+SCOPE_RULES = {"published-narrative": PUBLISHED_LEAK_RULES}
+
+# Set by `main` when a scope IS the publication declaration. See
+# `narrative_rules_apply`: document CLASS is a proxy for "will a stranger read
+# this", and when the scope answers that question directly the proxy is not
+# just unnecessary, it is wrong.
+PUBLISHED_SURFACE_SCOPE = False
 
 # ---- rule catalog -----------------------------------------------------------
 # severity: "error" gates (non-zero exit); "warn" reports (editorial candidates).
@@ -100,6 +156,9 @@ RULES = {
     "proposal-citation-dangling":   ("error", "cited proposal resolves to no file under any configured root"),
     "amendment-provenance":     ("error", "amendment-provenance note (how-we-got-here; not normative)"),
     "hash-width-pin":           ("error", "hash width stated as a requirement (SPECIFICATION-FORMAT.md §8.4.5)"),
+    "operator-quote":           ("error", "operator conversation quoted in a document that publishes"),
+    "internal-path-ref":        ("error", "internal repo path or agent-guidance file named in a document that publishes"),
+    "discipline-letter-ref":    ("error", "internal discipline letter (L6+) cited in a document that publishes"),
 }
 
 # `entity-browser-rust` was absent from this alternation for months, and the gap is
@@ -115,6 +174,39 @@ IMPL_TEAM_RE = re.compile(
     re.IGNORECASE,
 )
 DATE_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+
+# ---- the three published-surface leak rules ---------------------------------
+# A published document is addressed to a reader outside this ecosystem. These
+# three catch the material that is meaningless or private to them.
+
+# An operator conversation, however it is framed. `[operator, 2026-08-21`,
+# "operator-directed", "per the operator", "the operator's own read".
+OPERATOR_RE = re.compile(
+    r"\boperator(?:-directed|-raised|-correction|'s)?\b|\[operator\b", re.IGNORECASE)
+
+# An internal path or an agent-guidance file. A reader who clones the public
+# repo has none of these, so a reference to one resolves to nothing — which is
+# the same defect as a `dev` SHA in a published document, one noun over.
+INTERNAL_PATH_RE = re.compile(
+    r"entity-(?:lab-legacy|systems|church)-meta"
+    r"|\bdocs/status/"
+    r"|\bAGENTS(?:-STANDARD)?\.md\b"
+    r"|\bMETHODOLOGY\.md\b"
+    r"|\bCLAUDE\.md\b"
+    r"|\bANTI-PATTERN-CASEBOOK\.md\b"
+    r"|\bCOHORT-OPEN-ITEMS\.md\b"
+    r"|\bDESIGN-REGISTER\.md\b"
+    r"|\bLEGACY-ARCHIVE-INDEX\.md\b"
+    r"|\.spec-baseline"
+)
+
+# An internal discipline letter. **L6 and up only, deliberately.** L0–L5 are
+# this project's published LAYER names ("the L5 application conventions"), so
+# matching them would fire on correct normative prose — a rule that cries wolf
+# on legitimate text is worse than no rule, because it teaches people to skip
+# the gate. L1–L5 as discipline references are therefore missed on purpose, and
+# that is a stated limit rather than an oversight.
+DISCIPLINE_LETTER_RE = re.compile(r"\bL(?:[6-9]|1\d|2\d)\b")
 PROPOSAL_RE = re.compile(r"\bPROPOSAL-[A-Z0-9]|\bproposals/")
 AMENDMENT_RE = re.compile(r"\bAmendment\s+\d", re.IGNORECASE)
 VERSION_TOKEN_RE = re.compile(r"^\s*v?(\d+(?:\.\d+)*)\b")
@@ -250,10 +342,26 @@ _ARCHIVE_ROOTS: List[Path] = []
 # reviewer still has to read the diff; what the gate guarantees is that the
 # total never silently grows.
 BASELINE_FILENAME = ".spec-baseline.json"
-BASELINE_RULES = frozenset({
-    "impl-team-ref", "date-in-body", "proposal-citation",
-    "amendment-provenance", "document-history-section",
-})
+
+# Baseline-eligible = every rule with real accumulated debt: the five narrative
+# rules plus the three published-surface ones. One definition, not two — a set
+# restated in two places is a divergence waiting for the next edit to reach only
+# one of them.
+#
+# The three new rules are eligible from the day they land, deliberately. Without
+# that, `--scope published-narrative` opens at 873 hard errors, and a gate that
+# is red on day one teaches people to skip it — the same reasoning that keeps
+# `sdksync`'s unpinned backlog non-gating and `coverage` at exit 0. Hold the
+# debt, gate the delta.
+BASELINE_RULES = NARRATIVE_RULES | PUBLISHED_LEAK_RULES
+
+
+def baseline_filename(scope: str) -> str:
+    """The baseline file for a scope. The default scope keeps the historical
+    name so nothing existing moves; every other scope gets its own file."""
+    if scope == DEFAULT_SCOPE:
+        return BASELINE_FILENAME
+    return ".spec-baseline-%s.json" % scope
 
 # WHICH DOCUMENTS THESE RULES APPLY TO — the specs, not the workflow.
 #
@@ -280,7 +388,21 @@ NARRATIVE_SCORED_CLASSES = frozenset({"canonical-spec"})
 
 
 def narrative_rules_apply(path_or_stem) -> bool:
-    """True when the narrative rules score this document (normative specs only)."""
+    """True when the narrative rules score this document.
+
+    Document class is a **proxy** for the question these rules actually ask —
+    *will a stranger read this?* The proxy was right while `intent` documents
+    stayed internal. It stopped being right when `docs/proposals` and
+    `docs/research/explorations` were declared `[[keep_tree]]`, at which point
+    169 `intent` documents began publishing and the proxy started excusing the
+    exact leak the rules exist to catch.
+
+    So when the SCOPE is itself the publication declaration, the proxy is
+    bypassed: the scope has answered the real question directly, and a class
+    check on top of it can only get it wrong.
+    """
+    if PUBLISHED_SURFACE_SCOPE:
+        return True
     stem = Path(path_or_stem).stem
     return _CFG.doc_class(stem) in NARRATIVE_SCORED_CLASSES
 
@@ -318,6 +440,55 @@ class Baseline:
         return self.counts.get((path, rule), 0)
 
 
+def resolve_moves(base: "Baseline",
+                  scanned: Optional[Set[str]]) -> Dict[str, str]:
+    """Baseline paths that MOVED, as {new_path: old_path}.
+
+    A path-keyed baseline reports a renamed file as entirely new debt, and in
+    this corpus a rename is not an edge case: **a proposal moving from `active/`
+    to `implemented/` is what folding one means**, so every fold would arrive as
+    a wall of errors nobody caused. Measured on the first fold after this scope
+    shipped: 24 findings re-reported as new, of which 24 were the same accepted
+    debt at a different path.
+
+    That is exactly the failure the line-keyed design was already rejected for —
+    *"every edit above a finding moves it, so the baseline reports whole files as
+    new debt on unrelated changes and gets deleted within a week"* — reappearing
+    one level up, at the path instead of the line.
+
+    **Deliberately conservative: a move is inferred only when a basename matches
+    exactly one absent baseline path and exactly one scanned path carrying no
+    debt of its own.** Ambiguity is left alone and reported as new, because
+    transplanting accepted debt onto the wrong file is worse than a finding a
+    human resolves in one look. Returns {} when `scanned` is None — a caller that
+    does not say what it read cannot be told what went missing.
+    """
+    if scanned is None:
+        return {}
+    have = {p for p, _ in base.counts}
+    gone = [p for p in have if p not in scanned]
+    fresh = [p for p in scanned if p not in have]
+    by_name: Dict[str, List[str]] = {}
+    for p in gone:
+        by_name.setdefault(Path(p).name, []).append(p)
+    moves: Dict[str, str] = {}
+    for p in fresh:
+        cands = by_name.get(Path(p).name, [])
+        if len(cands) == 1 and sum(
+                1 for q in fresh if Path(q).name == Path(p).name) == 1:
+            moves[p] = cands[0]
+    return moves
+
+
+def follow_moves(base: "Baseline", moves: Dict[str, str]) -> "Baseline":
+    """A copy of `base` with moved files re-keyed to where they now live."""
+    if not moves:
+        return base
+    old_for = {v: k for k, v in moves.items()}
+    counts = {((old_for.get(f, f)), r): n for (f, r), n in base.counts.items()}
+    return Baseline(counts, base.categories, base.meta)
+
+
 def observed_counts(report: Dict[str, List["Finding"]]) -> Dict[Tuple[str, str], int]:
     out: Dict[Tuple[str, str], int] = {}
     for rp, fs in report.items():
@@ -336,6 +507,7 @@ def apply_baseline(report: Dict[str, List["Finding"]], base: "Baseline",
     several — the count is what is authoritative, so the last N are reported and
     the message says so rather than implying the gate identified a culprit.
     """
+    base = follow_moves(base, resolve_moves(base, scanned))
     new: Dict[str, List[Finding]] = {}
     n_known = 0
     seen = observed_counts(report)
@@ -378,7 +550,14 @@ def ratchet_baseline(old: "Baseline", seen: Dict[Tuple[str, str], int],
     `--root ONE-FILE --update-baseline` lowers every other file to 0 and erases
     the ratchet's entire record; because the ratchet only ever lowers, no refusal
     fires and the run reports success.
+
+    A file that MOVED is followed first (`resolve_moves`), so `--update-baseline`
+    after a fold re-keys the entry instead of refusing the new path as unbaselined
+    debt while carrying the old path forward forever. **It still may not raise:**
+    the followed entry keeps its old count and is then lowered to what was
+    observed, exactly as if the file had not moved.
     """
+    old = follow_moves(old, resolve_moves(old, scanned))
     refused: List[str] = []
     counts: Dict[Tuple[str, str], int] = {}
     for key, was in old.counts.items():
@@ -573,6 +752,12 @@ def analyze(path: Path, text: str) -> List[Finding]:
                 findings.append(Finding(rule, ln1, name))
         if AMENDMENT_RE.search(ln):
             findings.append(Finding("amendment-provenance", ln1, ln.strip()[:90]))
+        if OPERATOR_RE.search(ln):
+            findings.append(Finding("operator-quote", ln1, ln.strip()[:90]))
+        if INTERNAL_PATH_RE.search(ln):
+            findings.append(Finding("internal-path-ref", ln1, ln.strip()[:90]))
+        if DISCIPLINE_LETTER_RE.search(ln):
+            findings.append(Finding("discipline-letter-ref", ln1, ln.strip()[:90]))
 
     # --- hash width pins (SPECIFICATION-FORMAT.md 8.4.5) ---
     # Deliberately scans INSIDE fences: every instance found in the 2026-08-10
@@ -593,6 +778,16 @@ def analyze(path: Path, text: str) -> List[Finding]:
     # are unaffected and still apply to every document.
     if not narrative_rules_apply(path):
         findings = [f for f in findings if f.rule not in BASELINE_RULES]
+
+    # The three published-surface rules are NEW and score only where the scope
+    # is the publication declaration. Letting them fire in the default scope
+    # would add errors to a corpus whose debt is already baselined — a ratchet
+    # that jumps is not a ratchet, and the reflex fix is to re-baseline, which
+    # is the one move the mechanism exists to refuse. Widen them deliberately,
+    # with an --init-baseline, not as a side effect of adding a rule.
+    if not PUBLISHED_SURFACE_SCOPE:
+        findings = [f for f in findings
+                    if f.rule not in (PUBLISHED_LEAK_RULES - NARRATIVE_RULES)]
 
     return findings
 
@@ -667,7 +862,8 @@ def rel(path: Path) -> str:
 
 def run_check(roots: List[Path], as_json: bool, max_examples: int,
               baseline_path: Optional[Path] = None,
-              use_baseline: bool = True) -> int:
+              use_baseline: bool = True,
+              only_rules: Optional[frozenset] = None) -> int:
     report: Dict[str, List[Finding]] = {}
     scanned_paths: Set[str] = set()
     n_scanned = 0
@@ -690,6 +886,8 @@ def run_check(roots: List[Path], as_json: bool, max_examples: int,
                       " nor a lint failure.", file=sys.stderr)
                 return 2
             scanned_paths.add(rel(spec))
+            if only_rules is not None:
+                f = [x for x in f if x.rule in only_rules]
             if f:
                 report[rel(spec)] = f
 
@@ -809,7 +1007,8 @@ def run_check(roots: List[Path], as_json: bool, max_examples: int,
     return 1 if n_error else 0
 
 
-def run_baseline(roots: List[Path], path: Path, update: bool) -> int:
+def run_baseline(roots: List[Path], path: Path, update: bool,
+                 only_rules: Optional[frozenset] = None) -> int:
     """Write (`--init-baseline`) or ratchet down (`--update-baseline`) the baseline.
 
     The asymmetry is the mechanism. `--init-baseline` accepts today's debt
@@ -834,6 +1033,8 @@ def run_baseline(roots: List[Path], path: Path, update: bool) -> int:
             except CouldNotLook as exc:
                 print("could not look: %s" % exc, file=sys.stderr)
                 return 2
+            if only_rules is not None:
+                f = [x for x in f if x.rule in only_rules]
             if f:
                 report[rel(spec)] = f
     if n_scanned == 0:
@@ -935,6 +1136,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="accepted-debt file (default: <corpus>/%s). Findings within "
                          "the accepted count are reported as known debt and do not "
                          "gate; anything beyond it is an error." % BASELINE_FILENAME)
+    ap.add_argument("--scope", metavar="NAME", default=DEFAULT_SCOPE,
+                    help="scope profile from config (default: %s). "
+                         "`published-narrative` reads the CANONICAL-DOCS keep_trees "
+                         "— the proposal and exploration documents that PUBLISH — "
+                         "and runs the five narrative rules only. It carries its own "
+                         "baseline file, so the two ratchets never overwrite each "
+                         "other." % DEFAULT_SCOPE)
     ap.add_argument("--no-baseline", action="store_true",
                     help="ignore the baseline — report the full, un-ratcheted state")
     ap.add_argument("--init-baseline", action="store_true",
@@ -948,6 +1156,26 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     set_proposal_archives(args.proposal_archive or _archive_roots_from_env())
 
+    # A scope selects the root AND the excludes AND the rule subset. Rebinding
+    # the module globals is how `iter_specs` sees it; the alternative is
+    # threading a scope object through every call site for one flag.
+    global DEFAULT_ROOT, EXCLUDE_DIRS, EXCLUDE_FILES, PUBLISHED_SURFACE_SCOPE
+    only_rules = None
+    if args.scope != DEFAULT_SCOPE:
+        try:
+            sc = _CFG.scope(args.scope)
+        except Exception as exc:  # noqa: BLE001
+            # An unknown scope must not fall back to the default: that reads as
+            # a pass over the surface the caller asked about and never got.
+            print("unknown scope %r: %s" % (args.scope, exc), file=sys.stderr)
+            print("  this is a could-not-look, not a clean run.", file=sys.stderr)
+            return 2
+        DEFAULT_ROOT, EXCLUDE_DIRS, EXCLUDE_FILES = (
+            sc.root, sc.exclude_dirs, sc.exclude_files)
+        only_rules = SCOPE_RULES.get(args.scope)
+        if only_rules is PUBLISHED_LEAK_RULES:
+            PUBLISHED_SURFACE_SCOPE = True
+
     roots = args.root or [DEFAULT_ROOT]
 
     if args.refine:
@@ -957,13 +1185,20 @@ def main(argv: Optional[List[str]] = None) -> int:
             ap.error("--refine takes a single --root (dir or file)")
         return run_refine(roots[0], args.output)
 
-    baseline_path = args.baseline or (_config.corpus_root() / BASELINE_FILENAME)
+    # Each scope gets its OWN baseline. Sharing one would be actively unsafe:
+    # `--update-baseline` lowers every entry it does not observe, so running it
+    # under a narrow scope would silently zero the wide scope's accepted debt and
+    # report that as a ratchet win.
+    baseline_path = args.baseline or (
+        _config.corpus_root() / baseline_filename(args.scope))
 
     if args.init_baseline or args.update_baseline:
-        return run_baseline(roots, baseline_path, update=args.update_baseline)
+        return run_baseline(roots, baseline_path, update=args.update_baseline,
+                            only_rules=only_rules)
 
     return run_check(roots, args.json, args.max_examples,
-                     baseline_path=baseline_path, use_baseline=not args.no_baseline)
+                     baseline_path=baseline_path,
+                     use_baseline=not args.no_baseline, only_rules=only_rules)
 
 
 if __name__ == "__main__":

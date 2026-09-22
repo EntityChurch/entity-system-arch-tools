@@ -18,6 +18,7 @@ that reads the one shared model (`model.py`) and the one config
     spec convergence [--window N|--json]                   spec rate-of-change + pipeline
     spec charter [--charter …|--agents …|--json]           the discipline set, both homes
     spec ledger [--root …|--json]                          declared counts vs the directories
+    spec register [--gate|--owed|--json]                   design docs findable by the QUESTION
     spec census [--doc …|--drift|--gaps|--json]            normative surface vs the cohort's own citations
     spec sdksync [--root …|--json|--unpinned|--update]      SDK restatements vs their sources
     spec provenance [--since REF|--proposal-root R|--json] L1: normative spec edit needs a proposal
@@ -65,6 +66,7 @@ import coverage
 import census
 import charter
 import ledger
+import register
 import sdksync
 import pins
 import provenance
@@ -91,6 +93,7 @@ DELEGATES = {
     "census": census.main,
     "charter": charter.main,
     "ledger": ledger.main,
+    "register": register.main,
     "sdksync": sdksync.main,
     "provenance": provenance.main,
     "pins": pins.main,

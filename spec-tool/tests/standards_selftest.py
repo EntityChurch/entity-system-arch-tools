@@ -269,6 +269,54 @@ r_case("ratchet_lowers_when_paid",
 _new, _known, _retired = standards.apply_baseline({}, B({("a.md", "date-in-body"): 2}))
 r_case("paid_debt_reported_retired", _retired == {("a.md", "date-in-body"): 2})
 
+# (9a) A file that MOVED keeps its accepted debt. In this corpus a rename is the
+#      normal lifecycle — folding a proposal moves it active/ → implemented/ — so
+#      a path-keyed baseline would report every fold as a wall of new errors.
+_moved_rep = {"docs/proposals/implemented/x/P-ONE.md":
+              [standards.Finding("impl-team-ref", 3, "seat"),
+               standards.Finding("impl-team-ref", 9, "seat")]}
+_moved_base = B({("docs/proposals/active/x/P-ONE.md", "impl-team-ref"): 2})
+_scanned = {"docs/proposals/implemented/x/P-ONE.md"}
+_new, _known, _ret = standards.apply_baseline(_moved_rep, _moved_base, _scanned)
+r_case("moved_file_keeps_its_baselined_debt",
+       _new == {} and _known == 2 and _ret == {})
+
+#      …and the ratchet re-keys it rather than refusing the new path forever.
+_r, _refused = standards.ratchet_baseline(
+    _moved_base, {("docs/proposals/implemented/x/P-ONE.md", "impl-team-ref"): 2},
+    _scanned)
+r_case("ratchet_follows_a_move",
+       not _refused
+       and _r.counts.get(("docs/proposals/implemented/x/P-ONE.md",
+                          "impl-team-ref")) == 2)
+
+#      NEGATIVE CONTROL — following a move must not launder an increase.
+_new, _known, _ = standards.apply_baseline(
+    {"docs/proposals/implemented/x/P-ONE.md":
+     [standards.Finding("impl-team-ref", i, "seat") for i in range(5)]},
+    _moved_base, _scanned)
+r_case("a_move_does_not_launder_new_debt",
+       len(_new.get("docs/proposals/implemented/x/P-ONE.md", [])) == 3
+       and _known == 2)
+
+#      NEGATIVE CONTROL — ambiguity is left alone, never guessed at. Two files of
+#      the same basename moving at once could be transplanted onto each other.
+_amb_base = B({("a/P-TWO.md", "impl-team-ref"): 2,
+               ("b/P-TWO.md", "impl-team-ref"): 2})
+_amb_scanned = {"c/P-TWO.md"}
+r_case("ambiguous_move_is_not_inferred",
+       standards.resolve_moves(_amb_base, _amb_scanned) == {})
+
+#      NEGATIVE CONTROL — an unrelated new file is still all-new debt.
+r_case("unrelated_new_file_is_not_a_move",
+       standards.resolve_moves(_moved_base, {"docs/proposals/active/x/P-ONE.md",
+                                             "docs/proposals/active/x/P-NEW.md"})
+       == {})
+
+#      A caller that does not say what it read is told nothing about moves.
+r_case("no_scanned_set_means_no_move_inference",
+       standards.resolve_moves(_moved_base, None) == {})
+
 # (10) Only the five narrative rules are ratchetable; everything else gates
 #      whatever the baseline says.
 r_case("non_baseline_rule_unaffected",
@@ -365,6 +413,99 @@ r_case("impl_team_ref_spares_the_language_rust",
        not _team_hit("Implementations in Rust MUST preserve the received bytes."))
 r_case("impl_team_ref_spares_the_word_browser",
        not _team_hit("A browser peer hands these to `RTCIceServer.urls` verbatim."))
+
+# (14) THE PUBLISHED-SURFACE RULES. `docs/proposals` and
+#      `docs/research/explorations` are declared `[[keep_tree]]` — they publish —
+#      and the narrative rules never read one of them, because narrative scoring
+#      was keyed on document CLASS and those documents are class `intent`. The
+#      class was a proxy for "will a stranger read this", correct until the day
+#      the keep_trees were declared. These rules score only when the SCOPE is the
+#      publication declaration, so they are exercised with that flag set.
+def _pub(text, rule):
+    """Findings of `rule` for `text` under the published-surface scope."""
+    prev = standards.PUBLISHED_SURFACE_SCOPE
+    standards.PUBLISHED_SURFACE_SCOPE = True
+    try:
+        return [f for f in standards.analyze(Path("PROPOSAL-THING.md"), text + "\n")
+                if f.rule == rule]
+    finally:
+        standards.PUBLISHED_SURFACE_SCOPE = prev
+
+
+def p_case(name, cond):
+    PASSED.append(name)
+    if not cond:
+        FAILURES.append(name)
+        print(f"  FAIL {name}")
+    else:
+        print(f"  ok   {name}")
+
+
+print("\npublished-surface leak rules")
+p_case("operator_quote_is_caught",
+       _pub("**Operator-directed, 2026-09-06:** *\"pull the research together\"*",
+            "operator-quote"))
+p_case("operator_possessive_is_caught",
+       _pub("the operator's own read is that it could be a site", "operator-quote"))
+p_case("bracketed_operator_note_is_caught",
+       _pub("`[operator, 2026-08-21, paraphrased: arch can manage core]`",
+            "operator-quote"))
+# THIS FILE PUBLISHES, so the meta-repo branch of INTERNAL_PATH_RE is exercised
+# from the rule's OWN alternation rather than from a hand-typed literal — a real
+# internal tree name written here is precisely the defect the rule exists to
+# catch, and a fixture that commits it is not a fixture, it is an instance.
+# Deriving it also means the case cannot silently stop covering this branch when
+# the alternation changes, which a literal would.
+#
+# Fails closed on its own input: if the pattern is reshaped so the alternation
+# cannot be read, this raises instead of quietly testing nothing. An empty
+# derived set would otherwise loop zero times and print exactly like a pass.
+_meta_alt = __import__("re").search(r"entity-\(\?:([^)]+)\)-meta", standards.INTERNAL_PATH_RE.pattern)
+if _meta_alt is None:
+    raise SystemExit("standards_selftest: cannot read INTERNAL_PATH_RE's meta-repo "
+                     "alternation — refusing to report a pass on an untested branch")
+_meta_names = [f"entity-{alt}-meta" for alt in _meta_alt.group(1).split("|")]
+if not _meta_names:
+    raise SystemExit("standards_selftest: INTERNAL_PATH_RE's meta-repo alternation is "
+                     "empty — refusing to report a pass on an untested branch")
+for _i, _name in enumerate(_meta_names):
+    # Numbered, not named: this runs in public CI, and printing the derived name
+    # would put back on a log the thing the derivation just took out of the file.
+    p_case(f"internal_meta_path_is_caught[{_i}]",
+           _pub(f"see `{_name}/entity-core-architecture/docs`", "internal-path-ref"))
+p_case("agent_guidance_file_is_caught",
+       _pub("`AGENTS.md` L16 names the region to search", "internal-path-ref"))
+p_case("status_dir_is_caught",
+       _pub("recorded in `docs/status/HANDOFF-2026-09-01-b.md`", "internal-path-ref"))
+p_case("discipline_letter_is_caught",
+       _pub("This is L23 on the document axis.", "discipline-letter-ref"))
+p_case("discipline_letter_possessive_is_caught",
+       _pub("L8's fifteenth form applies here.", "discipline-letter-ref"))
+
+# NEGATIVE CONTROLS. Each of these is legitimate published prose, and a rule
+# that fired on them would be re-baselined into irrelevance inside a release.
+print("  -- negative controls --")
+p_case("layer_names_L0_to_L5_are_published_vocabulary",
+       not _pub("the L5 application conventions sit above L1", "discipline-letter-ref"))
+p_case("L5_is_not_a_discipline_letter",
+       not _pub("An L5 convention MUST NOT assume a transport.",
+                "discipline-letter-ref"))
+p_case("the_word_operators_is_not_an_operator_quote",
+       not _pub("Comparison operators evaluate left to right.", "operator-quote"))
+p_case("an_ordinary_spec_path_is_not_an_internal_path",
+       not _pub("defined in `specs/extensions/EXTENSION-TREE.md` §3.3a",
+                "internal-path-ref"))
+p_case("a_guides_path_is_not_an_internal_path",
+       not _pub("see `guides/GUIDE-CONFORMANCE.md` §5.1", "internal-path-ref"))
+
+# The scope gate itself: outside a published-surface scope these three are
+# silent, so adding them cannot make an already-baselined corpus jump.
+print("  -- the new rules do not fire outside a published scope --")
+for _r in ("operator-quote", "internal-path-ref", "discipline-letter-ref"):
+    p_case("silent_in_default_scope__" + _r.replace("-", "_"),
+           not [f for f in standards.analyze(
+               Path("EXTENSION-GADGET.md"),
+               "the operator said L23 in `AGENTS.md`\n") if f.rule == _r])
 
 if FAILURES:
     print(f"\n{len(FAILURES)} failure(s):")

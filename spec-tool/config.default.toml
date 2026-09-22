@@ -132,6 +132,44 @@ exclude_dirs = ["deprecated", "archived", "archive", "test-vectors", "reviews",
 # The rulebooks quote their own counter-examples; never lint them.
 exclude_files = ["SPECIFICATION-FORMAT.md", "STYLE-NAMING-CONVENTIONS.md", "BACKLOG.md"]
 
+[scope.published-narrative]  # the OTHER published surface: docs that publish
+# `spec standards --scope published-narrative`. The five narrative rules only
+# (see NARRATIVE_RULES in standards.py); the structural rules are meaningless
+# over a proposal and would bury the signal.
+#
+# Why this scope exists. `core-specs-strict` above excludes `proposals`,
+# `explorations` and `reviews`, and its neighbour `naming-surface` states the
+# reasoning outright: *"proposals and explorations are drafts by definition."*
+# That was true, and it stopped being true when this corpus declared
+# `[[keep_tree]]` over `docs/proposals` and `docs/research/explorations` — they
+# are product now, they reach a reader outside the ecosystem, and the rules that
+# exist to keep process narrative out of a stranger's document had never read
+# one of them. Measured 2026-09-07: operator quotations in 18, seat names in 106,
+# internal discipline-letter references in 93.
+#
+# `reviews/` is NOT here, deliberately: it is undeclared and does not publish.
+# The scope tracks the publication declaration, not the directory's shape — that
+# is the whole correction, so keep the two in step when CANONICAL-DOCS moves.
+#
+# CANONICAL-DOCS moved, 2026-09-08: DISCIPLINE-CHARTER is undeclared. Its entry
+# below used to be an EXCEPTION — excluded on rulebook grounds, *a rulebook quotes
+# its own counter-examples* — which was defensible and was also exactly how the
+# leak stayed invisible. It is now excluded BY THE RULE: an undeclared file is out
+# of a published-narrative scope by construction. The entry stays because this
+# list is a name filter and the file still sits under `docs/`, but it no longer
+# rests on a judgment call. Same for DESIGN-REGISTER, ANTI-PATTERN-CASEBOOK,
+# COHORT-OPEN-ITEMS and LEGACY-ARCHIVE-INDEX — none of those is declared either,
+# so every name below is now redundant-with-the-declaration rather than an
+# override of it. **If one of them is ever declared, delete its line here** —
+# do not let a name filter quietly outrank the keep-list.
+root = "docs"
+exclude_dirs = ["status", "archive", "archived", "deprecated", "reviews",
+                "__pycache__", ".git", "node_modules"]
+exclude_files = ["DESIGN-REGISTER.md", "COHORT-OPEN-ITEMS.md",
+                 "DISCIPLINE-CHARTER.md", "ANTI-PATTERN-CASEBOOK.md",
+                 "LEGACY-ARCHIVE-INDEX.md", "STATUS.md",
+                 "DOCTRINE-COHORT-STATE-TRACKING.md"]
+
 [scope.test-vector-corpus]  # spec-corpus's view: the ARTIFACTS, not the prose
 # The one scope that reaches INTO test-vectors. Every other scope excludes it,
 # which is why the corpus was not merely unlinted but UNREACHABLE: a

@@ -177,6 +177,7 @@ test: compile parity
 	@$(PYTHON) spec-tool/tests/sdksync_selftest.py
 	@$(PYTHON) spec-tool/tests/pins_selftest.py
 	@$(PYTHON) spec-tool/tests/census_selftest.py
+	@$(PYTHON) spec-tool/tests/register_selftest.py
 
 lint: compile
 
