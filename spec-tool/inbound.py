@@ -91,11 +91,39 @@ PACKET_DIR = "docs/status"
 # This is the same defect `register` hit twice and `ledger` once: a matcher
 # calibrated against the names the rule-writer expects, rather than against the
 # corpus's actual vocabulary.
+# **The table held only the three repos the arch seat owns, so `--root` at any
+# other tree returned COULD-NOT-LOOK** — while `AGENTS-STANDARD.md` tells every
+# seat in the ecosystem to point this gate at its own tree. Measured 2026-09-10
+# by running it from a cohort tree to check whether a relay addressed to that
+# seat was visible: it was not, and the reason was this table, not the packet.
+# Extended from the addressee vocabulary actually in use across the estate's
+# `ROUTING-*` files, counted rather than guessed.
+#
+# `names_us` matches on word boundaries that exclude `-`, so a short form is
+# never a substring hit: `core-rust` does not fire inside `entity-core-rust`,
+# `rust` does not fire inside `entity-browser-rust`, and each alias only ever
+# matches a genuinely bare token.
+#
+# **Bare `go` is the one alias with a plausible false positive** — the English
+# verb, inside a `To:`/`cc:` clause ("this should go to arch"). It is kept
+# deliberately: for an INBOX gate, over-reporting is the safe direction. A
+# spurious row is read once and dismissed; a packet that never appears is the
+# failure this gate exists to prevent.
 ALIASES: Dict[str, Tuple[str, ...]] = {
     "entity-system-architecture": ("entity-system-architecture", "arch",
                                    "architecture"),
     "entity-core-protocol": ("entity-core-protocol", "core-protocol"),
     "entity-system-arch-tools": ("entity-system-arch-tools", "arch-tools"),
+    "entity-core-go": ("entity-core-go", "core-go", "go"),
+    "entity-core-rust": ("entity-core-rust", "core-rust", "rust"),
+    "entity-core-py": ("entity-core-py", "core-py", "py"),
+    "entity-core-keystone": ("entity-core-keystone", "core-keystone",
+                             "keystone"),
+    "entity-core-formalization": ("entity-core-formalization",
+                                  "core-formalization", "formalization"),
+    "entity-browser-rust": ("entity-browser-rust", "browser-rust"),
+    "entity-workbench-go": ("entity-workbench-go", "workbench-go"),
+    "entity-system-generator": ("entity-system-generator", "generator"),
 }
 
 # `**To:** X · **From:** Y` puts both on one line, so the value terminates at
@@ -245,6 +273,17 @@ def cites(stem: str, tokens: List[str]) -> Optional[str]:
     return None
 
 
+def citing_tokens(stem: str, tokens: List[str]) -> List[str]:
+    """EVERY ledger token that reaches this packet, not just the longest.
+
+    Settling the ambiguity question needs the whole set, not one match: a
+    packet reached by its full stem AND by a bare `date-letter` is genuinely
+    cited, and one reached ONLY by the bare id is not. `cites` returns the
+    longest and cannot tell those apart.
+    """
+    return [t for t in tokens if stem == t or stem.startswith(t + "-")]
+
+
 def iter_packets(peers: Path, self_name: str) -> List[Path]:
     found: List[Path] = []
     for repo in sorted(p for p in peers.iterdir() if p.is_dir()):
@@ -357,12 +396,28 @@ def scan(root: Path, peers: Optional[Path] = None) -> Tuple[int, dict]:
     cited: List[str] = []
     cc_owed: List[dict] = []
     unaddressed: List[dict] = []
+    ambiguous_credit: List[dict] = []
     other = 0
     by_seat: Dict[str, int] = {}
-    # token -> every scanned packet it reaches. A token reaching more than one
-    # is an ambiguous identifier, which is a finding about the NAMING scheme
-    # and not about routing, so it is reported in its own bucket.
+
+    # ------------------------------------------------------------------
+    # PASS 1 — classify, and map every token to every packet it reaches.
+    #
+    # This used to be one pass that credited a packet the moment `cites`
+    # returned a hit, and computed `reach` from those hits afterwards. So a
+    # token reaching five packets DISCHARGED ALL FIVE, and the run printed
+    # "-> 5 packets" in its own summary while doing it: the ambiguity was
+    # reported as a note and consumed as a credit.
+    #
+    # Measured when it was found (2026-09-11): a bare `ROUTING-2026-09-10-c`
+    # on arch's ledger, naming entity-core-go's packet, silently discharged
+    # entity-workbench-go's UNRELATED packet of the same id. Found by hand.
+    # A `date-letter` id is unique to one repo on one day, which is not
+    # unique, so this is a standing property of the naming scheme and not a
+    # one-off.
+    # ------------------------------------------------------------------
     reach: Dict[str, List[str]] = {}
+    staged: List[Tuple[dict, List[str]]] = []
 
     for p in packets:
         try:
@@ -381,14 +436,34 @@ def scan(root: Path, peers: Optional[Path] = None) -> Tuple[int, dict]:
             unaddressed.append(rec)
             continue
 
-        hit = cites(stem, tokens)
-        if hit:
-            reach.setdefault(hit, []).append(str(p))
-            cited.append(str(p))
+        hits = citing_tokens(stem, tokens)
+        for t in hits:
+            reach.setdefault(t, []).append(str(p))
+        staged.append((rec, hits))
+
+    # ------------------------------------------------------------------
+    # PASS 2 — a token that reaches more than one packet discharges NONE of
+    # them. It is could-not-look at the level of a single row: the citation
+    # cannot be resolved by a reader, which is the whole reason the standard
+    # says to cite a packet by its full stem.
+    #
+    # Its own bucket, never folded into `cited` and never into `owed` — the
+    # same design as `unaddressed`, and for the same reason. Silently
+    # crediting hides a real obligation; silently owing manufactures work
+    # against a row that may well exist. UNKNOWN is the honest answer and it
+    # is the one a human can act on in a minute.
+    # ------------------------------------------------------------------
+    for rec, hits in staged:
+        resolving = [t for t in hits if len(reach[t]) == 1]
+        if resolving:
+            cited.append(rec["file"])
             continue
-        if kind == "to":
+        if hits:
+            ambiguous_credit.append(dict(rec, cited_by=sorted(hits)))
+            continue
+        if rec["kind"] == "to":
             owed.append(rec)
-            by_seat[seat] = by_seat.get(seat, 0) + 1
+            by_seat[rec["seat"]] = by_seat.get(rec["seat"], 0) + 1
         else:
             cc_owed.append(rec)
 
@@ -402,11 +477,12 @@ def scan(root: Path, peers: Optional[Path] = None) -> Tuple[int, dict]:
         "scanned": len(packets),
         "collapsed_clones": collapsed,
         "clone_seats": sorted({c["seat"] for c in collapsed}),
-        "addressed_to_us": len(owed) + len(cited),
+        "addressed_to_us": len(owed) + len(cited) + len(ambiguous_credit),
         "cited": len(cited),
         "owed": owed,
         "cc_owed": cc_owed,
         "unaddressed": unaddressed,
+        "ambiguous_credit": ambiguous_credit,
         "ambiguous_citations": ambiguous,
         "addressed_elsewhere": other,
         "by_seat": by_seat,
@@ -453,6 +529,14 @@ def report(res: dict, gate: bool, owed_only: bool, unaddressed_only: bool
               % len(res["ambiguous_citations"]))
         for a in res["ambiguous_citations"]:
             print("    %s -> %d packets" % (a["citation"], len(a["matches"])))
+    if res.get("ambiguous_credit"):
+        print("%d packet(s) are reached ONLY by such a citation and are "
+              "therefore NEITHER cited nor owed — that is UNKNOWN, and it is "
+              "one lookup to settle. Re-cite the row by FULL STEM:"
+              % len(res["ambiguous_credit"]))
+        for a in res["ambiguous_credit"]:
+            print("    %s\n        reached only by: %s"
+                  % (a["file"], ", ".join(a["cited_by"])))
     print("a ledger row is evidence of ATTENTION, never that the item was "
           "read correctly.")
     if not gate:

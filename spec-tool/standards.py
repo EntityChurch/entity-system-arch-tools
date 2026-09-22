@@ -124,9 +124,18 @@ NARRATIVE_RULES = frozenset({
 # Only the first had a rule, and that rule was scoped away. The other three had
 # nothing at all — which is why this is a scope fix AND three new rules, not a
 # scope fix alone.
+#
+# ⚠ The fifth rule is NOT a leak, and saying so is the honest widening of this
+# set rather than a silent one: `proposal-artifact-unnamed` is a **published
+# reader's cost**, not an internal detail escaping. It belongs to this scope for
+# the same reason the other four do — **this is the only scope that visits the
+# published proposal surface at all** — and the question the scope answers is
+# *what does a stranger reading this suffer*, which a title they cannot classify
+# is an instance of. Read the set as "scored over the published narrative
+# surface", not as "things that leak".
 PUBLISHED_LEAK_RULES = frozenset({
     "impl-team-ref", "operator-quote", "internal-path-ref",
-    "discipline-letter-ref",
+    "discipline-letter-ref", "proposal-artifact-unnamed",
 })
 
 # scope name -> the rule subset it scores. A scope not listed runs the full rule
@@ -159,6 +168,7 @@ RULES = {
     "operator-quote":           ("error", "operator conversation quoted in a document that publishes"),
     "internal-path-ref":        ("error", "internal repo path or agent-guidance file named in a document that publishes"),
     "discipline-letter-ref":    ("error", "internal discipline letter (L6+) cited in a document that publishes"),
+    "proposal-artifact-unnamed": ("error", "proposal whose title is a sentence and whose header does not name the artifact it proposes"),
 }
 
 # `entity-browser-rust` was absent from this alternation for months, and the gap is
@@ -173,6 +183,35 @@ IMPL_TEAM_RE = re.compile(
     r"|entity-core-(?:go|rust|python|py)|(?:entity-)?browser-rust|wb-go)\b",
     re.IGNORECASE,
 )
+
+# A seat token inside one of OUR OWN DOCUMENT NAMES is a CITATION, not a seat
+# reference, and the alternation above cannot tell them apart — because a
+# document is allowed to be named after the surface it describes.
+# `guides/GUIDE-ENTITY-WORKBENCH-APP.md` is a PUBLISHED guide, cited by name in
+# seven other published guides; `workbench` catches every one of those. So the
+# rule accused a document of leaking a seat name for doing the exact thing this
+# corpus asks — cite the authority by name — and the accusation is unfixable by
+# the author, since the citation IS the document's name.
+#
+# Same calibration defect the `operator` note below records, arriving through a
+# filename instead of a word: the pattern was written against the vocabulary the
+# rule-writer expected, not the corpus's actual one.
+#
+# Strip document-name spans before matching. A document name is the corpus's own
+# house shape — SCREAMING-KEBAB under a known leading class, the same shape
+# `address` resolves. Everything else still fires: bare `workbench`,
+# `entity-workbench-go`, a repo path, prose.
+DOC_NAME_RE = re.compile(
+    r"\b(?:GUIDE|SPEC|SPECIFICATION|EXTENSION|SDK|APP-CONVENTION|ENTITY|STYLE|ROADMAP|PRIMER)"
+    r"-[A-Z0-9]+(?:-[A-Z0-9]+)*\b"
+)
+
+
+def impl_team_hit(line: str) -> bool:
+    """True when `line` names an implementation seat OUTSIDE any document name."""
+    return bool(IMPL_TEAM_RE.search(DOC_NAME_RE.sub(" ", line)))
+
+
 DATE_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 # ---- the three published-surface leak rules ---------------------------------
@@ -815,6 +854,60 @@ def first_content_line(lines: List[str]) -> Optional[Tuple[int, str]]:
     return None
 
 
+# ---- D14: a proposal names the artifact it proposes -------------------------
+# This corpus's house style makes a proposal TITLE a full sentence stating the
+# finding, which carries argument a noun cannot — and which a reader cannot
+# CLASSIFY. Measured cost, reported by two seats in one day about one document:
+# a reader asked whether the title was an extension name, a process name or a
+# document name *before* asking what it said, and the answer — it is the
+# proposal's title, the artifact is named four lines down — is in the document
+# and is not derivable from outside it.
+#
+# Fourth instance in one arc of *the name is load-bearing and review does not
+# see it*; the other three are layer labels colliding with the architecture's
+# own layer names, a chapter titled with a word that already titles a different
+# chapter in the document it joins, and an extension name importing a
+# consistency model the mechanism refuses. Both consuming seats asked for
+# structural enforcement rather than a review question, which is what this is.
+#
+# **Two ways to satisfy it, because a title that already names the artifact owes
+# nothing:** an H1 carrying an artifact token or a backticked identifier, or a
+# `Proposes:` field in the header region. It fires only when NEITHER holds.
+ARTIFACT_TOKEN_RE = re.compile(
+    r"\b(?:EXTENSION|SDK|APP-CONVENTION|GUIDE|SYSTEM|ENTITY|STYLE|SPECIFICATION"
+    r"|ARCHITECTURE|ROADMAP|DOCTRINE|WORKFLOW)-[A-Z0-9][A-Z0-9-]+"
+)
+
+
+def header_field_either_spelling(lines: List[str], name: str) -> Optional[Tuple[int, str]]:
+    """`**Name**: v` and `**Name:** v` are both live in this corpus.
+
+    Specs write the first, proposals write the second. A matcher that knows only
+    one reports a correctly-declared document as undeclared — the toolkit's own
+    most-repeated defect, a matcher calibrated against the spelling the
+    rule-writer expects rather than the corpus's actual vocabulary.
+    """
+    pat = re.compile(r"^\*\*%s(?:\*\*\s*:|\s*:\*\*)\s*(.*)$" % re.escape(name))
+    for i, ln in enumerate(lines):
+        if ln.startswith("## "):
+            break
+        m = pat.match(ln)
+        if m:
+            return i, m.group(1).strip()
+    return None
+
+
+def proposal_names_artifact(lines: List[str]) -> bool:
+    """True if a proposal declares WHAT it proposes, by title or by header field."""
+    fc = first_content_line(lines)
+    if fc and fc[1].startswith("# "):
+        title = fc[1]
+        if ARTIFACT_TOKEN_RE.search(title) or "`" in title:
+            return True
+    fld = header_field_either_spelling(lines, "Proposes")
+    return fld is not None and bool(fld[1])
+
+
 def doc_history_span(lines: List[str]) -> Optional[Tuple[int, int]]:
     """Return [start, end) line indices of a Document History section, or None."""
     start = None
@@ -868,6 +961,11 @@ def analyze(path: Path, text: str) -> List[Finding]:
         if find_header_field(lines, "Depends") is None:
             findings.append(Finding("depends-missing", 1, ""))
 
+    # --- a proposal names its artifact (D14) ---
+    if path.name.startswith("PROPOSAL-") and not proposal_names_artifact(lines):
+        findings.append(Finding("proposal-artifact-unnamed", (fc[0] + 1) if fc else 1,
+                                fc[1].strip()[:90] if fc else "(empty file)"))
+
     # --- document history ---
     span = doc_history_span(lines)
     if span:
@@ -885,7 +983,7 @@ def analyze(path: Path, text: str) -> List[Finding]:
         ln1 = i + 1
         if DATE_RE.search(ln):
             findings.append(Finding("date-in-body", ln1, ln.strip()[:90]))
-        if IMPL_TEAM_RE.search(ln):
+        if impl_team_hit(ln):
             findings.append(Finding("impl-team-ref", ln1, ln.strip()[:90]))
         if PROPOSAL_RE.search(ln):
             findings.append(Finding("proposal-citation", ln1, ln.strip()[:90]))

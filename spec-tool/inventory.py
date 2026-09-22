@@ -70,10 +70,39 @@ CLEAN, VIOLATIONS, CANNOT_LOOK = 0, 1, 2
 
 BASELINE = ".spec-inventory-baseline.json"
 
-# Where inventories live. Extensions only for now, on purpose: the application
-# and SDK tiers have conformance surfaces too, and widening the scope before the
-# extension tier has run with the scheme would report a backlog nobody agreed to.
-SCAN = ("specs/extensions",)
+# Where inventories live.
+#
+# WIDENED 2026-09-11, and the correction is worth keeping. This read
+# `("specs/extensions",)` with the note: "Extensions only for now, on purpose: the
+# application and SDK tiers have conformance surfaces too, and widening the scope
+# before the extension tier has run with the scheme would report a backlog nobody
+# agreed to."
+#
+# That reasoning was sound about the tiers it NAMED and silently excluded the one it
+# did not. The core protocol is not an optional tier waiting its turn -- it is the
+# layer every peer must converge on -- and its conformance section carries 98
+# obligations (§9.1's 66, §9.2's 9, §9.3's 10, §9.4's 13) with not one addressable
+# id. So the ratchet could be driven to 26 of 26, clean gate and rising floor, with
+# the mandatory layer at zero and OUTSIDE THE DENOMINATOR.
+#
+# A scope that enumerates its exclusions is auditable; one that omits a member
+# without naming it reports a clean number over a hole. The failure was not that the
+# core tier was judged and deferred -- it is that it was never in the list to judge.
+# (Found by `entity-system-conformance`, whose design keys on requirement ids, by
+# reading the scan root rather than trusting the count.)
+#
+# `specs` is a NON-RECURSIVE glob, so it does not re-reach `specs/extensions`. Point
+# it at the core corpus with `--root ../entity-core-protocol`.
+SCAN = ("specs/extensions", "specs")
+
+# Only canonical specs carry conformance inventories. Top-level `specs/` also holds
+# authoring standards and architecture documents -- `SPECIFICATION-FORMAT` is a
+# guide, `SYSTEM-ARCHITECTURE` an arch-doc -- and firing `no-conformance-section` on
+# a rulebook is a false accusation against correct text. Same class map `address` and
+# `coverage` read, and `coverage` made exactly this mistake before `f629145`: its
+# "5 specs have no guide" list held a rulebook, a condensed working reference and a
+# domain charter, each already classed non-spec by a map it was not consulting.
+SCAN_CLASS = "canonical-spec"
 
 # §8.5a's closed vocabulary. Six values, no others. `IMPL-DEFINED` is a row like
 # any other — a deliberate statement that the spec declines to constrain a named
@@ -220,13 +249,43 @@ def analyze(rel: str, text: str) -> dict:
 
 
 def iter_specs(root: Path) -> List[Path]:
+    """Canonical specs under SCAN, de-duplicated, class-filtered.
+
+    De-duplication is real and not defensive: `specs` and `specs/extensions` are
+    both listed, and a corpus that ever nests differently would otherwise analyze
+    one file twice and double its contribution to the conformant count -- a
+    ratchet that can be raised by counting one document twice is not a ratchet.
+    """
     found: List[Path] = []
+    seen = set()
     for base in SCAN:
         b = root / base
         if not b.is_dir():
             continue
-        found.extend(sorted(b.glob("*.md")))
+        for p in sorted(b.glob("*.md")):
+            rp = p.resolve()
+            if rp in seen:
+                continue
+            if _doc_class(p.stem) != SCAN_CLASS:
+                continue
+            seen.add(rp)
+            found.append(p)
     return found
+
+
+def _doc_class(stem: str) -> str:
+    """The corpus class for a document stem, or `canonical-spec` if unknowable.
+
+    Defaulting to the SCANNED class on a missing/broken config is deliberate: the
+    alternative silently empties the scope, and an analyzer that reports a clean
+    zero because it could not read its own config is could-not-look wearing a
+    verdict's clothes -- the defect this toolkit has now shipped five times.
+    """
+    try:
+        import config as _config
+        return _config.load().doc_class(stem)
+    except Exception:
+        return SCAN_CLASS
 
 
 def read_baseline(root: Path) -> dict:

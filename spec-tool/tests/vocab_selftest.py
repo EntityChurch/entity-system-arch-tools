@@ -169,6 +169,78 @@ def main() -> int:
     ok("the open family is REPORTED as open, not silently absorbed",
        bool(res["families"].get("embed", {}).get("open")), res["families"])
 
+    # -- 4a. an open family IMPLEMENTED BY PREFIX is visible ----------------
+    # `A-37` (browser-rust, 2026-09-11): the declaring side has `_DECL_PARAM`
+    # and the implementing side had no counterpart, so a seat shipping a full
+    # `app/embed/{media_type}` codec read as `implemented: 0` — the concrete
+    # tags are composed at runtime and are literals nowhere.
+    #
+    # This is the QUIET direction: it under-reports in silence, so the family
+    # would have read 0 no matter who built it. Both directions are asserted,
+    # because the silent one is exactly the one nobody notices.
+    _c, res = run(
+        {"EMBED.md": EMBED_SPEC},
+        {"seat-a": {"e.rs": 'const P: &str = "app/embed/";'},
+         "seat-b": {"other.go": 'const T = "app/share/record"'}})
+    ok("a seat emitting an open family's PREFIX is credited with it",
+       res["families"]["embed"]["open_seats"] == ["seat-a"],
+       res["families"].get("embed"))
+    ok("...and the prefix is still not counted as a TAG",
+       "app/embed" not in tags(res, "implemented-undeclared"),
+       tags(res, "implemented-undeclared"))
+
+    _c, res = run(
+        {"EMBED.md": EMBED_SPEC},
+        {"seat-a": {"e.rs": 'const T: &str = "app/share/record";'},
+         "seat-b": {"other.go": 'const T = "app/share/record"'}})
+    ok("a family nobody implements reports NO seats, not a false credit",
+       res["families"]["embed"]["open_seats"] == [],
+       res["families"].get("embed"))
+
+    # -- 4b. a PINNED TREE PATH is not undeclared vocabulary ----------------
+    # `A-40` (browser-rust, 2026-09-11), 4a's sibling running the other way and
+    # the EXPENSIVE direction: `make lint` failed a conformant seat over
+    # `app/feed/index`, the convention's own pinned index path. The
+    # trailing-slash guard cannot see it — a COMPLETE path has no trailing
+    # slash — so the corpus is the discriminator: a pinned path is written
+    # `/{peer}/app/feed/index` and a type tag never is.
+    FEED_SPEC = (
+        "feed-index-head = {\n"
+        '  type: "app/feed/index-head",\n'
+        "}\n"
+        "**Two pinned paths:** the head at `/{peer}/app/feed/index` and pages\n"
+        "at `/{peer}/app/feed/index/{page}`.\n")
+    _c, res = run(
+        {"FEED.md": FEED_SPEC},
+        {"seat-a": {"f.rs": 'const K: &str = "app/feed/index";\n'
+                            'const T: &str = "app/feed/index-head";'},
+         "seat-b": {"f.go": 'const T = "app/feed/index-head"'}})
+    ok("a pinned TREE PATH is not accused of being undeclared vocabulary",
+       "app/feed/index" not in tags(res, "implemented-undeclared"),
+       tags(res, "implemented-undeclared"))
+
+    # Declared wins: a tag the corpus DECLARES stays vocabulary even when a
+    # path-shaped mention of it also appears, or the path form would launder a
+    # real tag out of the check entirely.
+    _c, res = run(
+        {"FEED.md": FEED_SPEC + "\nSee `/{peer}/app/feed/index-head` too.\n"},
+        {"seat-a": {"f.rs": 'const T: &str = "app/feed/index-head";'},
+         "seat-b": {"f.go": 'const O = "app/share/record"'}})
+    ok("a DECLARED tag is not laundered into a path by a path-shaped mention",
+       res["families"]["feed"]["declared"] == 1
+       and res["families"]["feed"]["implemented"] == 1,
+       res["families"].get("feed"))
+
+    # Negative control: a genuinely invented tag is STILL caught, so the two
+    # new exemptions did not open a hole.
+    _c, res = run(
+        {"FEED.md": FEED_SPEC},
+        {"seat-a": {"f.rs": 'const T: &str = "app/feed/invented";'},
+         "seat-b": {"f.go": 'const T = "app/feed/index-head"'}})
+    ok("an invented tag in a pinned-path family is still reported",
+       "app/feed/invented" in tags(res, "implemented-undeclared"),
+       tags(res, "implemented-undeclared"))
+
     # -- 5. a counter-example in prose is not a declaration -----------------
     _c, res = run(
         {"SHARE.md": SHARE_SPEC},

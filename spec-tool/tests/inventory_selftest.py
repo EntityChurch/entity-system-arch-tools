@@ -217,6 +217,38 @@ Words about what conformance means.
     ok("a defect INSIDE an adopted inventory gates regardless of backlog",
        code == inventory.VIOLATIONS, code)
 
+    # --- SCOPE: the core tier is in the denominator (widened 2026-09-11) -----
+    #
+    # The scan root was `("specs/extensions",)`, so the core protocol -- the one
+    # layer every peer must converge on -- was not in it. The ratchet could reach
+    # 26 of 26 with 98 unaddressable core obligations OUTSIDE the denominator.
+    #
+    # BOTH directions, because only the second one is load-bearing: a canonical
+    # spec at top-level `specs/` IS scanned, and a guide sitting beside it is NOT
+    # -- firing `no-conformance-section` on a rulebook is a false accusation
+    # against correct text, which is the mistake `coverage` shipped before
+    # `f629145`.
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td) / "corpus"
+        (root / "specs" / "extensions").mkdir(parents=True)
+        (root / "specs" / "extensions" / "EXTENSION-A.md").write_text(
+            GOOD, encoding="utf-8")
+        (root / "specs" / "ENTITY-CORE-PROTOCOL.md").write_text(
+            legacy, encoding="utf-8")          # the core tier's shape
+        (root / "specs" / "SPECIFICATION-FORMAT.md").write_text(
+            "# Format\n\nNo conformance section, and that is correct.\n",
+            encoding="utf-8")                  # a guide; must stay invisible
+        scanned = sorted(p.name for p in inventory.iter_specs(root))
+
+    ok("a top-level canonical spec is scanned (the core tier is reachable)",
+       "ENTITY-CORE-PROTOCOL.md" in scanned, scanned)
+    ok("...and a guide beside it is NOT — no false no-conformance-section",
+       "SPECIFICATION-FORMAT.md" not in scanned, scanned)
+    ok("...and extensions are still scanned",
+       "EXTENSION-A.md" in scanned, scanned)
+    ok("...and nothing is analyzed twice — a double count would inflate the floor",
+       len(scanned) == 2, scanned)
+
     print("\ninventory self-test: %s"
           % ("all assertions passed" if not FAILURES
              else "%d FAILURE(S): %s" % (len(FAILURES), ", ".join(FAILURES))))

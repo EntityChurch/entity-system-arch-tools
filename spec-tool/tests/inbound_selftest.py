@@ -220,6 +220,60 @@ def main() -> int:
            code == inbound.CLEAN and not res["owed"] and res["cited"] == 2,
            res)
 
+        # ---- an AMBIGUOUS citation discharges NOTHING --------------------
+        # A `date-letter` id is unique to one repository on one day, which is
+        # not unique. Until 2026-09-11 a bare one credited EVERY packet it
+        # reached, and the run printed `-> N packets` in its own summary while
+        # doing it: the ambiguity was reported as a note and consumed as a
+        # credit. Live at the fix, SEVEN packets were discharged this way —
+        # including one addressed to arch BY NAME by `entity-core-keystone`.
+        # The instance that surfaced it was found by hand, not by the gate.
+        TWO_C = {"entity-core-go": {
+                     "ROUTING-2026-09-10-c-the-design-is-signed-off.md": TO_ARCH},
+                 "entity-workbench-go": {
+                     "ROUTING-2026-09-10-c-the-file-sync-pattern.md": TO_ARCH}}
+
+        code, res = run(
+            tmp, "| **X-1** | see `ROUTING-2026-09-10-c` | arch | OPEN |\n",
+            TWO_C)
+        amb = {Path(a["file"]).name for a in res["ambiguous_credit"]}
+        ok("an ambiguous citation credits NEITHER packet",
+           res["cited"] == 0, res["cited"])
+        ok("both land in the ambiguous bucket",
+           amb == {"ROUTING-2026-09-10-c-the-design-is-signed-off.md",
+                   "ROUTING-2026-09-10-c-the-file-sync-pattern.md"}, amb)
+        ok("an ambiguous packet is not silently OWED either",
+           res["owed"] == [], res["owed"])
+        ok("the collision is still reported as a naming finding",
+           len(res["ambiguous_citations"]) == 1, res["ambiguous_citations"])
+
+        # The other direction, and it is the half that matters: cite ONE by
+        # full stem. That one is cited; its collided neighbour stays UNKNOWN
+        # rather than riding on it.
+        code, res = run(
+            tmp,
+            "see `ROUTING-2026-09-10-c-the-design-is-signed-off` and "
+            "`ROUTING-2026-09-10-c`\n", TWO_C)
+        amb = {Path(a["file"]).name for a in res["ambiguous_credit"]}
+        ok("a FULL-STEM citation still credits its own packet",
+           res["cited"] == 1, res["cited"])
+        ok("its collided neighbour does not ride on it",
+           amb == {"ROUTING-2026-09-10-c-the-file-sync-pattern.md"}, amb)
+
+        # Negative control: an unambiguous ledger behaves exactly as before,
+        # so the new bucket is not swallowing the ordinary case.
+        code, res = run(
+            tmp, "see `ROUTING-2026-09-10-c-the-design`\n",
+            {"entity-core-go": {
+                "ROUTING-2026-09-10-c-the-design-is-signed-off.md": TO_ARCH},
+             "entity-workbench-go": {
+                "ROUTING-2026-09-11-q-unrelated.md": TO_ARCH}})
+        ok("an unambiguous ledger still credits normally",
+           res["cited"] == 1 and res["ambiguous_credit"] == [], res)
+        ok("and the genuinely uncited packet is still owed",
+           {Path(o["file"]).name for o in res["owed"]}
+           == {"ROUTING-2026-09-11-q-unrelated.md"}, res["owed"])
+
         # ---- clone collapse, and it is validated in BOTH directions ------
         # The defect: this scope is a directory of directories and several of
         # them are working clones of one repository at different tips. Measured
@@ -305,6 +359,45 @@ def main() -> int:
 
     ok("a bare leading clause still does not credit a longer sibling",
        inbound.cites("ROUTING-2026-09-06-bb-x", ["ROUTING-2026-09-06-b"]) is None)
+
+    # ---- the alias table covers the ECOSYSTEM, not just the arch seat -----
+    # `AGENTS-STANDARD.md` tells every seat to point this gate at its own tree.
+    # Until 2026-09-10 the table held three repos, so every other seat got a
+    # COULD-NOT-LOOK — found by running it from a cohort tree to check whether a
+    # relay addressed to that seat was visible. It was not, and the packet was
+    # fine.
+    for seat in ("entity-core-go", "entity-core-rust", "entity-core-py",
+                 "entity-core-keystone", "entity-core-formalization",
+                 "entity-browser-rust", "entity-workbench-go",
+                 "entity-system-generator"):
+        ok("%s has addressee aliases" % seat, seat in inbound.ALIASES)
+
+    RUST = inbound.ALIASES["entity-core-rust"]
+    PY = inbound.ALIASES["entity-core-py"]
+    BROWSER = inbound.ALIASES["entity-browser-rust"]
+
+    # Both directions on the same packet: the addressee is credited AND the
+    # look-alike seat is not.
+    RELAY = ("**From:** `entity-core-go`. **To:** `entity-core-rust`, "
+             "`entity-core-py`. **cc:** arch, `entity-core-keystone`.\n")
+    ok("a relay names its addressee", inbound.classify(RELAY, RUST) == "to")
+    ok("the same relay is not the look-alike seat's",
+       inbound.classify(RELAY, BROWSER) == "other")
+
+    # The substring guard, which is what makes bare short forms safe at all:
+    # `rust` must not fire inside `entity-browser-rust`, and vice versa.
+    ok("`rust` does not fire inside `entity-browser-rust`",
+       inbound.classify("**To:** `entity-browser-rust`\n", RUST) == "other")
+    ok("`browser-rust` does not fire inside a core-rust packet",
+       inbound.classify("**To:** `entity-core-rust`\n", BROWSER) == "other")
+
+    # The bare-nickname form the cohort actually writes in a cc list.
+    BARE_CC = ("**To:** `entity-system-architecture`\n"
+               "**cc:** `entity-core-keystone`, rust, py\n")
+    ok("a bare `py` in a cc list is a cc, not silence",
+       inbound.classify(BARE_CC, PY) == "cc")
+    ok("a bare `rust` in a cc list is a cc, not a to",
+       inbound.classify(BARE_CC, RUST) == "cc")
 
     print()
     if FAILURES:

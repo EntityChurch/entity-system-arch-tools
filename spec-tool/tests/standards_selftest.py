@@ -544,6 +544,33 @@ p_case("an_ordinary_spec_path_is_not_an_internal_path",
 p_case("a_guides_path_is_not_an_internal_path",
        not _pub("see `guides/GUIDE-CONFORMANCE.md` §5.1", "internal-path-ref"))
 
+# A seat token inside OUR OWN DOCUMENT NAME is a citation, not a seat reference.
+# `guides/GUIDE-ENTITY-WORKBENCH-APP.md` is a published guide cited by name in
+# seven other published guides, and `workbench` caught every one — an accusation
+# the author cannot fix, because the citation IS the document's name.
+#
+# Asserted in BOTH directions: an exemption that also silences the real finding
+# is worse than the false positive it fixes.
+print("  -- a seat token inside a document name is a citation --")
+p_case("doc_name_workbench_is_a_citation",
+       not standards.impl_team_hit(
+           "see `GUIDE-ENTITY-WORKBENCH-APP` §5.4 rule 3 for the carve-out"))
+p_case("doc_name_alone_on_a_table_row_is_silent",
+       not standards.impl_team_hit("| `GUIDE-ENTITY-WORKBENCH-APP.md` §5.4 | the rule |"))
+#      ...and every real reference still fires, including beside a document name:
+#      the exemption strips a SPAN, it is never a line-level pardon.
+p_case("seat_beside_a_doc_name_still_fires",
+       standards.impl_team_hit(
+           "`GUIDE-ENTITY-WORKBENCH-APP` says so; `entity-core-rust` disagrees"))
+for _seat in ("workbench-go ships this today",
+              "`entity-workbench-go` measured it",
+              "keystone is the conformance anchor",
+              "browser-rust shipped the arm",
+              "the cohort agreed on Tuesday",
+              "guides/guide-entity-workbench-app.md"):   # lowercase is not a doc name
+    p_case("seat_still_fires__" + _seat.split()[0].strip("`/."),
+           standards.impl_team_hit(_seat))
+
 # The scope gate itself: outside a published-surface scope these three are
 # silent, so adding them cannot make an already-baselined corpus jump.
 print("  -- the new rules do not fire outside a published scope --")
@@ -647,6 +674,93 @@ with tempfile.TemporaryDirectory() as _td2:
     finally:
         standards.EXCLUDE_DIRS, standards.EXCLUDE_FILES = _prev_excl_d, _prev_excl_f
 p_case("default_scope_applies_no_publication_filter", "ANYTHING.md" in _seen2)
+
+# ---------------------------------------------------------------------------
+# D14 — a proposal names the artifact it proposes.
+#
+# The rule exists because a reader could not classify a proposal's sentence
+# title as an extension name, a process name or a document name, and asked which
+# it was before asking what it said. **Two satisfying forms**, because a title
+# that already names the artifact owes nothing — so the cases below assert the
+# SILENCE as hard as the finding. An exemption nobody can audit is not an
+# exemption, and a rule that fires on correct documents teaches people to skip
+# the gate.
+from pathlib import Path as _P  # noqa: E402
+
+def _d14(name, body):
+    """Score under the published-narrative scope, which is the only one that
+    runs this rule — `analyze` drops the published-surface rules outright in the
+    default scope, so a fixture that forgets the flag scores every case SILENT
+    and the whole block passes vacuously. It did, on the first run of this file."""
+    prev = standards.PUBLISHED_SURFACE_SCOPE
+    standards.PUBLISHED_SURFACE_SCOPE = True
+    try:
+        return [f for f in standards.analyze(_P(name), body)
+                if f.rule == "proposal-artifact-unnamed"]
+    finally:
+        standards.PUBLISHED_SURFACE_SCOPE = prev
+
+_SENTENCE = "# PROPOSAL — keeping a copy current is one mechanism\n\n**Status:** DRAFT\n"
+
+p_case("d14_fires_on_a_sentence_title_with_no_artifact",
+       len(_d14("PROPOSAL-X.md", _SENTENCE)) == 1)
+
+# Both header spellings are live in this corpus — specs write `**Name**:` and
+# proposals write `**Name:**`. A matcher that knows only one reports a
+# correctly-declared document as undeclared, which is this toolkit's own
+# most-repeated defect (a matcher calibrated against the spelling the
+# rule-writer expects rather than the corpus's actual vocabulary). Both are
+# asserted; neither is assumed.
+p_case("d14_silent_when_Proposes_uses_the_proposal_spelling",
+       _d14("PROPOSAL-X.md",
+            "# PROPOSAL — a sentence\n\n**Proposes:** `EXTENSION-CURRENT-COPY`\n") == [])
+p_case("d14_silent_when_Proposes_uses_the_spec_spelling",
+       _d14("PROPOSAL-X.md",
+            "# PROPOSAL — a sentence\n\n**Proposes**: EXTENSION-CURRENT-COPY\n") == [])
+p_case("d14_silent_when_the_title_carries_an_artifact_token",
+       _d14("PROPOSAL-X.md", "# PROPOSAL — EXTENSION-RELAY completes the mode set\n") == [])
+p_case("d14_silent_when_the_title_carries_a_backticked_identifier",
+       _d14("PROPOSAL-X.md", "# PROPOSAL — `system/device`: host introspection\n") == [])
+
+# An EMPTY field is not a declaration. Without this, `**Proposes:**` with
+# nothing after it satisfies the rule and the gate certifies a blank.
+p_case("d14_fires_on_an_empty_Proposes_field",
+       len(_d14("PROPOSAL-X.md", "# PROPOSAL — a sentence\n\n**Proposes:**\n")) == 1)
+
+# Scope: the rule is about PROPOSALS. A spec, a guide or an exploration with a
+# sentence title owes nothing, and firing there would bury the signal in the
+# scope that has to stay readable.
+p_case("d14_does_not_fire_outside_proposals",
+       _d14("EXPLORATION-SOMETHING.md", _SENTENCE) == [])
+p_case("d14_does_not_fire_on_a_spec", _d14("EXTENSION-TREE.md", _SENTENCE) == [])
+
+# The header region ends at the first `##`. A `Proposes:` line BELOW it is not a
+# header field — the same region defect that scored a spec as declaring nothing
+# because its declaration sat under sixty lines of version history, running the
+# other way.
+p_case("d14_ignores_a_Proposes_line_below_the_header_region",
+       len(_d14("PROPOSAL-X.md",
+                "# PROPOSAL — a sentence\n\n## Body\n\n**Proposes:** `EXTENSION-X`\n")) == 1)
+
+# And it must actually be REACHABLE: a rule absent from the scope's rule set is
+# a rule that never runs, however correct its logic.
+p_case("d14_is_scored_by_the_published_narrative_scope",
+       "proposal-artifact-unnamed" in standards.SCOPE_RULES["published-narrative"])
+p_case("d14_gates_rather_than_warns",
+       standards.RULES["proposal-artifact-unnamed"][0] == "error")
+
+# ...and it MUST stay out of the default scope, where the corpus debt is
+# baselined separately. A rule that leaks across scopes makes the other
+# baseline jump, and the reflex fix for a jumping ratchet is to re-baseline —
+# the one move the mechanism exists to refuse.
+_prev_pss = standards.PUBLISHED_SURFACE_SCOPE
+standards.PUBLISHED_SURFACE_SCOPE = False
+try:
+    _default_scope = [f for f in standards.analyze(_P("PROPOSAL-X.md"), _SENTENCE)
+                      if f.rule == "proposal-artifact-unnamed"]
+finally:
+    standards.PUBLISHED_SURFACE_SCOPE = _prev_pss
+p_case("d14_is_silent_in_the_default_scope", _default_scope == [])
 
 if FAILURES:
     print(f"\n{len(FAILURES)} failure(s):")

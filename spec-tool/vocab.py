@@ -127,6 +127,21 @@ _LITERAL_RE = re.compile(r'"(' + _TAG + r'/?)"')
 _DECL_PARAM = re.compile(
     r'(?:type\s*[:=]\s*)"?(app/[a-z0-9][a-z0-9/_-]*?)/(?:\{[a-z_]+\}|"\s*\.cat)')
 
+# A PINNED TREE PATH, not a type tag. `APP-CONVENTION-FEED` §4.2 pins its index
+# head at `/{peer}/app/feed/index` — a path a conformant seat MUST emit, and one
+# no spec declares as vocabulary because it is not vocabulary.
+#
+# The defect this closes (`A-40`, browser-rust, 2026-09-11) is the EXPENSIVE
+# direction: `make lint` failed a conformant seat for `app/feed/index`, a tag it
+# does not emit. The existing guard keys on a trailing slash — added after a run
+# read the tree prefix `"app/share/records/"` as invented vocabulary — and a
+# COMPLETE path carries no trailing slash, so it is indistinguishable from a tag
+# by shape alone.
+#
+# The corpus is the discriminator, not the shape: a pinned path is written with
+# its peer-namespace prefix (`/{peer}/…`) and a type tag never is.
+_DECL_PATH = re.compile(r'/\{[a-z_]+\}/(' + _TAG + r')')
+
 _TEST_NAME = re.compile(r"(^|/)(tests?)/|_test\.(go|rs|py)$|(^|/)test_[^/]*\.py$")
 
 
@@ -174,18 +189,22 @@ def family(tag: str) -> str:
 # --------------------------------------------------------------------------
 
 def scan_corpus(corpus: Path) -> Tuple[Dict[str, Set[str]], Dict[str, Set[str]],
-                                       Dict[str, Set[str]]]:
-    """(declared, mentioned, parametric) — tag → set of relative spec paths.
+                                       Dict[str, Set[str]], Dict[str, Set[str]]]:
+    """(declared, mentioned, parametric, pinned_paths) — tag → spec paths.
 
     `parametric` is keyed by the OPEN PREFIX, e.g. `app/embed`, and means the
     spec declared a family rather than an enumeration.
+
+    `pinned_paths` is keyed by a TREE PATH the corpus pins, e.g.
+    `app/feed/index`. It is not vocabulary and a seat emitting it is conformant.
     """
     declared: Dict[str, Set[str]] = defaultdict(set)
     mentioned: Dict[str, Set[str]] = defaultdict(set)
     param: Dict[str, Set[str]] = defaultdict(set)
+    pinned: Dict[str, Set[str]] = defaultdict(set)
     specs = corpus / "specs"
     if not specs.is_dir():
-        return declared, mentioned, param
+        return declared, mentioned, param, pinned
     for p in sorted(specs.rglob("*.md")):
         rel = str(p.relative_to(corpus))
         try:
@@ -208,10 +227,18 @@ def scan_corpus(corpus: Path) -> Tuple[Dict[str, Set[str]], Dict[str, Set[str]],
                 declared[t].add(rel)
             for m in _DECL_PARAM.finditer(line):
                 param[m.group(1)].add(rel)
+            for m in _DECL_PATH.finditer(line):
+                pinned[m.group(1)].add(rel)
             for t in _TAG_RE.findall(line):
                 if t not in hits:
                     mentioned[t].add(rel)
-    return declared, mentioned, param
+    # A token DECLARED as a type is a type, whatever else it looks like. A spec
+    # that both declares `app/x` and writes `/{peer}/app/x` has declared it, and
+    # the path form must not launder it out of the vocabulary.
+    for t in list(pinned):
+        if t in declared:
+            del pinned[t]
+    return declared, mentioned, param, pinned
 
 
 def parametric_home(tag: str, param: Dict[str, Set[str]]) -> Optional[str]:
@@ -259,6 +286,10 @@ def scan_seat(name: str, root: Path, spec: dict) -> dict:
     oracle = spec.get("oracle_paths", [])
     product: Dict[str, Set[str]] = defaultdict(set)
     tests: Dict[str, Set[str]] = defaultdict(set)
+    # Trailing-slash literals, slash stripped. NOT tags — see the skip below —
+    # but they are the only evidence a seat implements a PARAMETRIC family,
+    # whose concrete tags are composed at runtime and are literals nowhere.
+    prefixes: Dict[str, Set[str]] = defaultdict(set)
     files = 0
     for g in globs:
         for p in sorted(root.rglob(g)):
@@ -286,11 +317,24 @@ def scan_seat(name: str, root: Path, spec: dict) -> dict:
                     # a tree prefix (`ShareOfferPrefix`), and stripping the slash
                     # to make it look like a tag is how the first run of this
                     # analyzer reported a path as an undeclared vocabulary item.
-                    if tag.endswith("/") or tag == "app":
+                    #
+                    # It is still recorded, because the SAME shape is how a seat
+                    # implements a parametric family: `"app/embed/" + media_type`
+                    # composes its concrete tag at runtime, so no literal tag
+                    # exists anywhere. Discarding it unread is why the `embed`
+                    # family read `implemented: 0` while a seat shipped a full
+                    # §3 codec (`A-37`, browser-rust, 2026-09-11). Which of the
+                    # two a prefix is, is decided by the CORPUS below — a tree
+                    # prefix is declared nowhere, an open family is declared by
+                    # `_DECL_PARAM` — never by its shape here.
+                    if tag.endswith("/"):
+                        prefixes[tag.rstrip("/")].add(rel)
+                        continue
+                    if tag == "app":
                         continue
                     (tests if (is_test_file or n in cfg_test) else product)[tag].add(rel)
     return {"name": name, "root": str(root), "files": files,
-            "product": product, "tests": tests,
+            "product": product, "tests": tests, "prefixes": prefixes,
             "head": git(root, "rev-parse", "--short", "HEAD"),
             "dirty": bool(git(root, "status", "--short"))}
 
@@ -318,7 +362,7 @@ def resolve_seats(corpus: Path) -> Tuple[List[dict], List[str]]:
 # --------------------------------------------------------------------------
 
 def scan(corpus: Path, prefix: Optional[str] = None) -> Tuple[int, dict]:
-    declared, mentioned, param = scan_corpus(corpus)
+    declared, mentioned, param, pinned = scan_corpus(corpus)
     present, missing = resolve_seats(corpus)
     if not (corpus / "specs").is_dir():
         return CANNOT_LOOK, {"why": f"no specs/ under {corpus}",
@@ -363,6 +407,10 @@ def scan(corpus: Path, prefix: Optional[str] = None) -> Tuple[int, dict]:
                 # Declared by an OPEN family. Conformant by construction; not a
                 # finding, and reporting it as one would accuse a correct seat.
                 continue
+            if t in pinned:
+                # A TREE PATH the corpus pins, not vocabulary. A seat emitting
+                # it is doing what the convention requires.
+                continue
             findings["implemented-undeclared"].append(
                 {"tag": t, "family": fam, "seats": im,
                  "mentioned_in": sorted(mentioned.get(t, ()))})
@@ -393,9 +441,15 @@ def scan(corpus: Path, prefix: Optional[str] = None) -> Tuple[int, dict]:
             continue
         dt = [t for t in declared if family(t) == fam]
         it = [t for t in impl if family(t) == fam]
+        opens = sorted(k for k in param if family(k + "/x") == fam)
+        # An OPEN family is implemented by a seat that emits its PREFIX — its
+        # concrete tags are composed at runtime and are literals nowhere, so
+        # counting literal tags alone reports 0 no matter who ships it.
+        open_seats = sorted({s["name"] for s in seats
+                             for k in opens if k in s["prefixes"]})
         families[fam] = {"declared": len(dt), "implemented": len(it),
                          "both": len([t for t in dt if t in impl]),
-                         "open": sorted(k for k in param if family(k + "/x") == fam)}
+                         "open": opens, "open_seats": open_seats}
 
     res = {"corpus": str(corpus), "seats": [
         {"name": s["name"], "head": s["head"], "dirty": s["dirty"],
@@ -442,8 +496,16 @@ def report(res: dict, gate: bool, owed: bool) -> None:
     print()
     print(f"  {'family':<12} {'declared':>8} {'implemented':>12} {'both':>6}")
     for fam, c in res["families"].items():
-        mark = "  (open family — declares a PATTERN, not an enumeration)" \
-            if c.get("open") else ""
+        mark = ""
+        if c.get("open"):
+            mark = "  (open family — declares a PATTERN, not an enumeration)"
+            # An open family's `implemented` column counts literal tags and is
+            # structurally 0 — the concrete tags are composed at runtime. Say
+            # who emits the prefix, or the row reads as "nobody built this".
+            if c.get("open_seats"):
+                mark += "; prefix emitted by " + ", ".join(c["open_seats"])
+            else:
+                mark += "; no seat emits the prefix"
         print(f"  {fam:<12} {c['declared']:>8} {c['implemented']:>12} "
               f"{c['both']:>6}{mark}")
     print()

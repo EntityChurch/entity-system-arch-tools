@@ -83,6 +83,44 @@ coincidence, not correspondence.
 
 ## Backlog
 
+- ⛔ **A `§9` conformance-floor row and the `§1.4` rule it restates drifted TWICE in TWO folds — a
+  co-change check is owed, and it has two known-positive validation inputs.** `ENTITY-CORE-PROTOCOL`'s
+  §9 core-floor list restates normative rules defined elsewhere in the same document, and **neither end
+  said it was a copy**, so a fold that corrected §1.4 left §9 publishing the superseded rule. Twice, at
+  the same row: the two-arm PD-2 opener (caught by `entity-core-go`) and the multi-signature conditional
+  (caught by `entity-core-keystone`). **Both were found by seats reading the floor, because the floor is
+  what an implementation builds from — never by us.**
+  **The check is mechanical and needs no NLP:** a commit touching the §1.4 PD-2 region while leaving the
+  §9 row untouched is a finding — the `provenance` two-part-trigger pattern, applied within one document.
+  **Validate against both instances in `entity-core-protocol` history (`a528d2e`, `05b7f74`) and against
+  the fold that DID move both (`dd5f785`), so it is exercised in both directions** before its first
+  number is published.
+  *Interim, already landed: the row now names §1.4 as its authority and states that §1.4 wins on
+  disagreement — `L23`'s prescribed form. That makes the drift greppable; it does not gate it.*
+- ⛔ **`address` — `_bare_internal` never resolves a section against a document named on
+  the same line, and the false NEGATIVE is the expensive half.** `spec-tool/address.py`
+  `_bare_internal()` returns clean whenever `sec in doc.sections` — *"conformant
+  same-document section ref"* — **without ever checking the document the line actually
+  names.** So a cross-doc citation whose section number happens to also exist in the host
+  document is graded against the wrong document and reported clean. That is the mechanism
+  behind the limit already recorded in the arch repo's `AGENTS.md` (*"a citation that
+  resolves to the wrong real section is invisible to every gate we have"*) — now located in
+  code rather than described.
+  **Live false POSITIVE, which is how it was found:** `ENTITY-CORE-PROTOCOL.md:322` cites
+  `EXTENSION-CONTINUATION.md §3.6b` — adjacent, qualified, and **the target exists**
+  (*Advance authority*, normative v1.22, opened and read before citing). It is reported as
+  `§3.6b not a section of host doc — broken self-ref`. The spec text was **left correct and
+  the finding filed**, rather than reworded to green the gate.
+  **Not a simple adjacency bug — a probe line of the identical shape
+  (`EXTENSION-CONTINUATION.md §97.5`, absent from both documents) produces NO finding**, so
+  binding to an external sibling doc works in the simple case and something about line 322's
+  shape defeats the antecedent (a bare `§6.8` precedes the doc token; suspect the
+  `governed_docs` / `ante` handling, not `SEC_RE`, which already accepts the `[a-z]?`
+  suffix).
+  **Validate any fix in BOTH directions against these three inputs** — the false positive,
+  the silent false negative (cite `SIBLING.md §X` where `§X` exists in both), and the
+  working probe — per the standing rule that a gate is replayed against the incident that
+  motivated it before its next number is published.
 - **Cut a versioned `CHANGELOG.md` entry for v0.8.0** — it is still under
   `[Unreleased]` as "Initial public research-preview release."
 - **Phase 2 — reconcile the `# DELTA(phase2)` carry-overs** in
