@@ -109,6 +109,9 @@ provenance:
 # Gates staleness, not correctness: a pin says the source span is byte-identical
 # to when someone last reviewed this restatement against it. Unpinned blocks are
 # a visible backlog and deliberately do not gate.
+pins:
+	@$(PYTHON) spec-tool/cli.py pins --root $(CORPUS)
+
 sdksync:
 	@$(PYTHON) $(CLI) --corpus $(CORPUS) sdksync
 
@@ -151,6 +154,7 @@ compile:
 		spec-tool/cli.py spec-tool/model.py spec-tool/render.py spec-tool/topology.py \
 		spec-tool/standards.py spec-tool/style.py spec-tool/corpus.py \
 		spec-tool/coherence.py spec-tool/ledger.py spec-tool/provenance.py \
+		spec-tool/pins.py \
 		spec-tool/convergence.py spec-tool/config.py && echo "✓ spec-tool package compiles"
 
 # --- ADR-0019 Tier-1 verbs (over the tool's OWN code) -----------------------
@@ -170,6 +174,7 @@ test: compile parity
 	@$(PYTHON) spec-tool/tests/ledger_selftest.py
 	@$(PYTHON) spec-tool/tests/provenance_selftest.py
 	@$(PYTHON) spec-tool/tests/sdksync_selftest.py
+	@$(PYTHON) spec-tool/tests/pins_selftest.py
 
 lint: compile
 

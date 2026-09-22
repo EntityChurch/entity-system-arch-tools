@@ -62,6 +62,7 @@ import corpus
 import coverage
 import ledger
 import sdksync
+import pins
 import provenance
 import model
 import render
@@ -86,6 +87,7 @@ DELEGATES = {
     "ledger": ledger.main,
     "sdksync": sdksync.main,
     "provenance": provenance.main,
+    "pins": pins.main,
 }
 
 
