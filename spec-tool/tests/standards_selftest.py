@@ -469,6 +469,48 @@ def p_case(name, cond):
         print(f"  ok   {name}")
 
 
+# --- header-region narrative (SPECIFICATION-FORMAT.md §5.3) -------------------
+# The tidy `## Document History` form was already caught. This is the form the
+# corpus actually uses, and it was invisible: 19 documents, 54 paragraphs,
+# 5,564 words above the first section heading, all scoring clean.
+print("\nheader-region narrative")
+_HDR = "# Spec\n\n**Version**: 1.5\n%s\n**Status**: Active\n\n## 1. Overview\n\ntext\n"
+
+
+def _hdr(mid, rule):
+    return rule in {f.rule for f in standards.analyze(
+        Path("specs/extensions/X.md"), _HDR % mid)}
+
+
+p_case("version_led_amendment_paragraph_is_caught",
+       _hdr("**v1.5:** §4.0 Resource resolution, binding every operation in §4.",
+            "header-narrative"))
+p_case("amendment_led_paragraph_is_caught",
+       _hdr("**Amendment 14 — the live-establishment seam.** A NAT'd peer falls through.",
+            "header-narrative"))
+p_case("blockquoted_amendment_is_caught",
+       _hdr("> **Amendment 12 — third partial fold.** The retry lifecycle lands here.",
+            "header-narrative"))
+# NEGATIVE CONTROLS. The remedy is to MOVE prose, so a false accusation costs an
+# author a real edit to a correct document — precision beats coverage here.
+p_case("declared_header_fields_are_not_narrative",
+       not _hdr("**Kind**: normative-spec\n**Authority**: binding\n**Depends**: X.md",
+                "header-narrative"))
+p_case("an_audience_line_is_not_narrative",
+       not _hdr("**Audience:** Application developers integrating the extension.",
+                "header-narrative"))
+p_case("a_path_notation_note_is_not_narrative",
+       not _hdr("> **Path notation.** Paths here are peer-relative; see §1.4.",
+                "header-narrative"))
+# ...and the same prose BELOW the first heading is a document's own history
+# section, which is `document-history-section`'s job, not this rule's. Two rules
+# firing on one line would double-count the debt in the baseline.
+p_case("amendment_prose_below_the_first_heading_is_not_this_rule",
+       "header-narrative" not in {f.rule for f in standards.analyze(
+           Path("specs/extensions/X.md"),
+           "# Spec\n\n**Version**: 1.5\n**Status**: Active\n\n## 1. Overview\n\n"
+           "**v1.4:** an amendment note, in the body where it is somebody else's problem.\n")})
+
 print("\npublished-surface leak rules")
 p_case("operator_quote_is_caught",
        _pub("**Operator-directed, 2026-09-06:** *\"pull the research together\"*",
@@ -538,9 +580,23 @@ for _noise in ("Bounds are operator-configurable; defaults conservative.",
                "a narrower path with operator-class authority",
                "consult specific operator-authored sources without signatures",
                "surfaced to the peer operator via an observable mechanism",
-               "an operator-supplied handle — a URL query, a QR code"):
+               "an operator-supplied handle — a URL query, a QR code",
+               # `deployment operator` is the corpus's own unambiguous term for
+               # the role — it is the audience line of a published guide — and
+               # it was missing beside `peer operator` until a reader-model
+               # study used it as its party noun and drew 14 false findings in
+               # one document. Same class as the compounds above: no
+               # attribution to the project operator ever wears this prefix.
+               "a deployment operator designing observability policy",
+               "the service operator decides the retention window",
+               "each node operator publishes its own reachability record"):
     p_case("deployment_sense_%s" % _noise.split()[-1].strip(".,—"),
            not _pub(_noise, "operator-quote"))
+# The other direction for the same widening: a qualified compound must not
+# become a way to smuggle an attribution past the rule.
+p_case("attribution_beside_a_deployment_operator_still_fires",
+       _pub("a deployment operator reads it — and the operator's ruling was to keep it",
+            "operator-quote"))
 # ...and the ambiguous forms deliberately still fire. Each of these is a real
 # leak that a tightened, attribution-only pattern dropped when it was measured.
 for _leak in ("From an operator question about store-and-forward under churn",

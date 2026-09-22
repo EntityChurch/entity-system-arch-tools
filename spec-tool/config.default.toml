@@ -120,7 +120,7 @@ default = "canonical-spec"
 # Post-split layout: every spec repo this tool serves keeps its normative
 # surface in `specs/` at the corpus root (entity-core-protocol: the V7 core +
 # the two rulebooks; entity-system-architecture: the same plus extensions/,
-# sdk/, applications/, domains/, with guides/ alongside). The pre-split roots
+# sdk/, bridge-extensions/, applications/, with guides/ alongside). The pre-split
 # (`core-protocol-domain/specs`) named a directory that exists in neither.
 
 [scope.core-specs]          # spec-topology's view: the normative surface

@@ -10,7 +10,7 @@ that reads the one shared model (`model.py`) and the one config
     spec render <file> [--what …|--format …|--output …]    catalogs (reader)
     spec topology [ROOT] [--json|--dot]                    corpus graph (reader)
     spec coverage [ROOT] [--gaps|--json]                   spec -> guide/proposal/research (reader)
-    spec address [ROOT] [--worklist …|--gate|--json]       §11 addressing validator
+    spec address [ROOT] [--owed|--worklist …|--gate|--json] §11 addressing validator
     spec standards [--root …|--refine|--json]              release-readiness gate
     spec style [--root …|--all|--json|--config …]          naming gate
     spec coherence [--root …|--json]                       internal-consistency gate
@@ -18,6 +18,7 @@ that reads the one shared model (`model.py`) and the one config
     spec convergence [--window N|--json]                   spec rate-of-change + pipeline
     spec charter [--charter …|--agents …|--json]           the discipline set, both homes
     spec roster [--gate|--owed|--json]                     roadmap version columns vs spec headers
+    spec shape [ROOT] [--paths|--json]                     path -> specifying document (advisory reader)
     spec expiry  [--gate|--owed|--json]                    tracker rows whose EVIDENCE died
     spec ledger [--root …|--json]                          declared counts vs the directories
     spec register [--gate|--owed|--json]                   design docs findable by the QUESTION
@@ -73,6 +74,7 @@ import census
 import vocab
 import charter
 import roster
+import shape
 import expiry
 import ledger
 import inbound
@@ -106,6 +108,7 @@ DELEGATES = {
     "vocab": vocab.main,
     "charter": charter.main,
     "roster": roster.main,
+    "shape": shape.main,
     "expiry": expiry.main,
     "ledger": ledger.main,
     "inbound": inbound.main,

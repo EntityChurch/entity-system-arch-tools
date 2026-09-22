@@ -105,6 +105,7 @@ CANONICAL_STATUS = _CFG.canonical_status
 NARRATIVE_RULES = frozenset({
     "impl-team-ref", "date-in-body", "proposal-citation",
     "amendment-provenance", "document-history-section",
+    "header-narrative",
 })
 
 # ---- what actually leaks out of a published PROPOSAL, which is not the same set
@@ -158,6 +159,7 @@ RULES = {
     "title-not-h1":             ("error", "first content line is not an H1 title"),
     "depends-missing":          ("error", "extension spec without a `**Depends**:` declaration (§8.1)"),
     "document-history-section": ("error", "Document History section (process history; belongs in the changelog)"),
+    "header-narrative":         ("error", "amendment/version narrative in the header region, above the first section (SPECIFICATION-FORMAT.md §5.3)"),
     "date-in-body":             ("error", "calendar date in body (internal-lab timing; not normative)"),
     "impl-team-ref":            ("error", "implementation/team reference (internal process; not normative)"),
     "proposal-citation":        ("error", "proposal-filename citation (internal routing; not normative)"),
@@ -259,7 +261,8 @@ OPERATOR_DOMAIN_RE = re.compile(
     r"\boperator[- ](?:configurable|class|authored|controlled|defined|supplied"
     r"|provided|facing|visible|observable|run|managed|owned|selected|specified"
     r"|initiated|interface|controller|node)\b"
-    r"|\bpeer operator\b|\boperators\b|\bhandler/operator\b",
+    r"|\b(?:peer|deployment|node|service) operator\b"
+    r"|\boperators\b|\bhandler/operator\b",
     re.IGNORECASE)
 
 OPERATOR_RE = re.compile(
@@ -929,6 +932,42 @@ def proposal_names_artifact(lines: List[str]) -> bool:
     return fld is not None and bool(fld[1])
 
 
+# Amendment / version narrative sitting in the HEADER REGION — between the H1
+# title and the first `## ` section heading.
+#
+# `document-history-section` already catches process history, but only in its
+# tidy form: a literal `## Document History` heading. **That is not where this
+# corpus actually puts it.** Measured 2026-09-14 over `specs/` + `guides/`:
+# **19 documents, 54 paragraphs, 5,564 words above the first section**, of which
+# `EXTENSION-NETWORK` alone is 3,108 words in 12 paragraphs. The tidy rule scored
+# every one of them clean — the fifth instance in this toolkit of a matcher
+# calibrated against the shape the rule-writer expected rather than the corpus's
+# actual one.
+#
+# **Why it is a defect rather than a style preference:** `SPECIFICATION-FORMAT.md`
+# §5.3 prescribes the header — seven declared fields — and narrative is not among
+# them. This is undeclared content occupying a prescribed region, and it occupies
+# the position a reader's introduction should be in. A reader who opens the
+# network extension to learn what it does meets a 3,100-word changelog first.
+#
+# **Deliberately narrow.** It matches only paragraphs LED by a version or
+# amendment marker (`**v1.5:**`, `**Amendment 14 — …**`, blockquoted or not).
+# A path-notation note, an `Audience:` line and the declared fields are all
+# legitimate header content and are not touched. High precision beats coverage
+# here: the remedy is to MOVE prose, so a false accusation costs an author a
+# real edit to a correct document.
+HEADER_NARRATIVE_RE = re.compile(
+    r"^>?\s*\*\*(?:v\d+\.\d+|Amendment\s)", re.IGNORECASE)
+
+
+def header_region_end(lines: List[str]) -> int:
+    """Index of the first `## ` heading, or len(lines) if there is none."""
+    for i, ln in enumerate(lines):
+        if ln.startswith("## "):
+            return i
+    return len(lines)
+
+
 def doc_history_span(lines: List[str]) -> Optional[Tuple[int, int]]:
     """Return [start, end) line indices of a Document History section, or None."""
     start = None
@@ -986,6 +1025,11 @@ def analyze(path: Path, text: str) -> List[Finding]:
     if path.name.startswith("PROPOSAL-") and not proposal_names_artifact(lines):
         findings.append(Finding("proposal-artifact-unnamed", (fc[0] + 1) if fc else 1,
                                 fc[1].strip()[:90] if fc else "(empty file)"))
+
+    # --- header-region narrative (SPECIFICATION-FORMAT.md §5.3) ---
+    for i in range(header_region_end(lines)):
+        if HEADER_NARRATIVE_RE.match(lines[i]):
+            findings.append(Finding("header-narrative", i + 1, lines[i].strip()[:90]))
 
     # --- document history ---
     span = doc_history_span(lines)

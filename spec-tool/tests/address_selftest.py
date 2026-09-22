@@ -418,6 +418,37 @@ def forward_marked_citation_in_normative_text_is_not_exempt():
     assert dg and "normative text" in dg[0].note, f
 
 
+@case
+def owed_renderer_elides_nothing():
+    """`--owed` prints every finding; `render_text` prints six per class and elides.
+
+    The founding incident: nine dangling citations to an unwritten bridge
+    specification were reported on every run and never read, because the
+    `dangling` class was 71 findings deep and the summary stops at six. A count
+    quoted off a truncated list is not a measurement of what is owed.
+    """
+    # 10 distinct dangling citations in one class — past render_text's cut of 6.
+    body = "# t\n\n## 1. a\n\n" + "".join(
+        "- see `EXTENSION-GHOST%d.md` §1.1 for this.\n" % i for i in range(10))
+    f = run("HOST", body, {"EXTENSION-ALPHA"})
+    dangling = [x for x in f if x.cls == "dangling"]
+    assert len(dangling) == 10, dangling
+
+    summary = address.render_text(f)
+    owed = address.render_owed(f)
+
+    # the summary elides, and now SAYS it elides
+    assert "TRUNCATED" in summary, summary
+    assert "+4 more" in summary, summary
+    assert sum(1 for x in dangling
+               if "%s:%d" % (x.file.split("/")[-1], x.line) in summary) < len(dangling), summary
+
+    # --owed carries every one of them, by file:line, and states the total
+    for x in dangling:
+        assert "%s:%d" % (x.file, x.line) in owed, (x, owed)
+    assert "%d finding(s) — the complete set" % len(f) in owed, owed
+
+
 def main():
     failed = 0
     for fn in CASES:

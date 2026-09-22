@@ -606,11 +606,33 @@ def render_text(findings: List[Finding]) -> str:
                                               f.reference, "→ %s.md" % f.target
                                               if f.target else f.note[:40]))
         if len(items) > 6:
-            out.append("    ... +%d more" % (len(items) - 6))
+            out.append("    ... +%d more  (TRUNCATED — `--owed` prints all %d)"
+                       % (len(items) - 6, len(items)))
         out.append("")
     out.append("(deviations only; a conformant citation is not a finding. "
-               "--worklist emits packets; --gate exits non-zero if any.)")
+               "--owed prints the full worklist; --worklist emits packets; "
+               "--gate exits non-zero if any.)")
     return "\n".join(out)
+
+
+def render_owed(findings: List[Finding]) -> str:
+    """The FULL worklist, one finding per line, nothing elided.
+
+    This exists because `render_text` prints six examples per class and then
+    `... +N more` — so a reader who runs the analyzer, skims the summary and
+    quotes the count has not seen the findings. Nine dangling citations to an
+    unwritten bridge specification sat in the `dangling` class, reported on every
+    run, below the cut, until a hand grep found them. Every other analyzer in
+    this toolkit has `--owed`; this one did not, and it has the largest finding
+    population of any of them.
+    """
+    lines: List[str] = []
+    for f in sorted(findings, key=lambda x: (x.cls, x.file, x.line, x.col)):
+        target = "→ %s.md" % f.target if f.target else f.note
+        lines.append("%-14s %s:%d  %s  %s" % (f.cls, f.file, f.line, f.reference, target))
+    lines.append("")
+    lines.append("%d finding(s) — the complete set, not a sample." % len(findings))
+    return "\n".join(lines)
 
 
 def emit_worklist(findings, docs, out_path: Path, batch_by: Optional[str]) -> None:
@@ -631,6 +653,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="corpus root dir (default: the published surface — "
                          "specs/ AND guides/ plus the roadmaps)")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--owed", action="store_true",
+                    help="print EVERY finding, one per line. The default summary shows six "
+                         "per class and elides the rest; a count read off a truncated list "
+                         "is not a measurement of what is owed.")
     ap.add_argument("--worklist", type=Path, help="emit finding packets as JSONL to this path")
     ap.add_argument("--batch-by", default=None,
                     help="document|section|class|count:N (tags packets for sharding)")
@@ -671,6 +697,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("wrote %d packet(s) to %s" % (len(findings), args.worklist))
     elif args.json:
         print(json.dumps([packet(f, docs) for f in findings], indent=2))
+    elif args.owed:
+        print(render_owed(findings))
     else:
         print(render_text(findings))
 
