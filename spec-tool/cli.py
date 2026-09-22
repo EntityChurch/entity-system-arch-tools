@@ -16,7 +16,9 @@ that reads the one shared model (`model.py`) and the one config
     spec coherence [--root …|--json]                       internal-consistency gate
     spec corpus [--root …|--vendor …|--json]               test-vector artifact gate
     spec convergence [--window N|--json]                   spec rate-of-change + pipeline
+    spec charter [--charter …|--agents …|--json]           the discipline set, both homes
     spec ledger [--root …|--json]                          declared counts vs the directories
+    spec census [--doc …|--drift|--gaps|--json]            normative surface vs the cohort's own citations
     spec sdksync [--root …|--json|--unpinned|--update]      SDK restatements vs their sources
     spec provenance [--since REF|--json]                   L1: normative spec edit needs a proposal
     spec check                                             run all three gates (style + standards + coherence)
@@ -60,6 +62,8 @@ import coherence
 import convergence
 import corpus
 import coverage
+import census
+import charter
 import ledger
 import sdksync
 import pins
@@ -84,6 +88,8 @@ DELEGATES = {
     "corpus": corpus.main,
     "convergence": convergence.main,
     "coverage": coverage.main,
+    "census": census.main,
+    "charter": charter.main,
     "ledger": ledger.main,
     "sdksync": sdksync.main,
     "provenance": provenance.main,

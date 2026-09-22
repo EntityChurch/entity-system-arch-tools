@@ -113,6 +113,72 @@ with tempfile.TemporaryDirectory() as tmp:
        count("**`active/core/` — 0**", base, "declared-count-mismatch") == 0)
 
     # ----------------------------------------------------------------------
+    # proposal-state-mismatch — the blind spot the count rules cannot see.
+    #
+    # The count rules AGREE about a folded proposal left in `active/`: the file
+    # is there and it is counted, so both totals are right and the backlog is
+    # still wrong. Every test here is about the DISAGREEMENT between a file's
+    # own status and its directory, and the two that carry weight are the
+    # negative directions — a declared hold that must stay quiet, and the house
+    # idiom that must not be missed.
+    # ----------------------------------------------------------------------
+    print("proposal-state-mismatch")
+
+    def state(status):
+        return ledger.state_finding("# T\n\n**Status:** %s\n" % status, Path("PROPOSAL-X.md"))
+
+    ok("a plain DRAFT is silent", state("DRAFT (2026-08-17)") is None)
+    ok("a folded status in active/ fires",
+       state("DRAFT — folded at authoring. `EXTENSION-HISTORY` v1.6 → v1.7") is not None)
+
+    # The regression for this rule's own first-run miss. A hand count found 9;
+    # the rule found 6, and all three misses were this one sentence — the
+    # corpus's standard phrasing for a proposal recording an already-landed
+    # fold. Matching the participle and not the noun was the whole bug, and it
+    # is the reason the marker list is calibrated against the corpus's actual
+    # vocabulary rather than a rule-writer's expectation of it.
+    ok("the house idiom `written after the fold` fires (first-run miss)",
+       state("DRAFT — reference proposal, written after the fold. See §0.") is not None)
+
+    # L3: a PARTIAL fold must stay active. The hold is declared, not inferred,
+    # so these are exemptions the gate can be audited on.
+    print("  holds are declared, not inferred")
+    for held in ("DRAFT — folded provisionally at §2.4. Stays active until the cohort answers",
+                 "PARTIALLY EXECUTED (2026-08-22) — stays in `active/`; read §8 first.",
+                 "DRAFT — partially folded ahead of this document. R4–R11 are open",
+                 "DRAFT — folded, then reopened; the pin is withdrawn"):
+        ok("held: %s" % held[:46], state(held) is None, "fired on a declared hold")
+
+    print("  scope and provenance")
+    ok("a `Status:` quoted mid-prose is not read as this file's own state",
+       ledger.state_finding(
+           "# T\n\n**Status:** DRAFT\n\nwe cite it: **Status:** folded at authoring\n",
+           Path("P.md")) is None)
+    ok("status_of takes the FIRST status only",
+       ledger.status_of("**Status:** DRAFT\n**Status:** folded\n") == "DRAFT")
+    ok("a file with no status header is silent, never a guess",
+       ledger.state_finding("# T\n\nno header here\n", Path("P.md")) is None)
+
+    # `implemented/` holding a DRAFT header is NOT a defect — a reference
+    # proposal written after its own fold says exactly that, correctly. Only
+    # `active/` carries a meaning a status can contradict.
+    with tempfile.TemporaryDirectory() as t2:
+        b2 = Path(t2)
+        (b2 / "active" / "extensions").mkdir(parents=True)
+        (b2 / "implemented" / "extensions").mkdir(parents=True)
+        (b2 / "active" / "extensions" / "A.md").write_text(
+            "**Status:** DRAFT — folded at authoring.\n", encoding="utf-8")
+        (b2 / "implemented" / "extensions" / "B.md").write_text(
+            "**Status:** DRAFT — reference proposal, written after the fold.\n",
+            encoding="utf-8")
+        found = ledger.analyze_states(b2)
+        ok("only `active/` is adjudicated; implemented/ is not a defect",
+           len(found) == 1 and found[0][0].name == "A.md",
+           "got %r" % [p.name for p, _ in found])
+        ok("the finding is reported against the proposal, not the index",
+           found and found[0][1].rule == "proposal-state-mismatch")
+
+    # ----------------------------------------------------------------------
     # The three-valued contract: scanning nothing is not passing.
     # ----------------------------------------------------------------------
     print("could-not-look")

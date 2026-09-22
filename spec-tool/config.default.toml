@@ -280,6 +280,23 @@ spec-change-trailer-unknown     = "warn"
 # because the document that had already done it could not be found. An index
 # without a gate becomes wrong within a cycle, so it gets this rung too.
 # ============================================================================
+[analyzer.charter]
+# The discipline set is written in two homes and neither says it is a copy of
+# the other, so a divergence is invisible from both. Paths are resolved against
+# the corpus root; a repo carrying neither has nothing to gate (exit 2).
+charter_doc = "docs/DISCIPLINE-CHARTER.md"
+agents_doc = "AGENTS.md"
+
+[analyzer.charter.rules]
+# A rule RATIFIED in one home and CANDIDATE in the other. The ladder makes the
+# distinction load-bearing: a candidate is honored but never claimed to
+# generalize, so the two homes disagree about what may be asserted.
+charter-status-divergence = "error"
+# Present in one home, absent from the other. The twelve-day shape: the summary
+# grew nine rules and the canonical table did not, so the document that answers
+# "what is the set?" was short and said so with no hedge.
+charter-rule-missing = "error"
+
 [analyzer.ledger]
 # Resolved against the corpus root. A repo carrying none of these has nothing
 # to gate, which is reported as could-not-look (exit 2), never as a pass.
@@ -293,6 +310,13 @@ declared-count-mismatch = "error"
 # as zero` shape: rename the directory and the pattern stops matching, so the
 # count silently stops being guarded while the run stays green.
 declared-count-dangling = "error"
+# A proposal whose own `Status:` says the edit landed while it sits in
+# `active/`. The count rules cannot see this — both totals agree, because
+# the file is still there and still counted. `active/` means work is owed,
+# so a folded proposal left there inflates the backlog with work already
+# done. A hold is DECLARED (partial / stays active / until the cohort),
+# never inferred: L3 requires a partial fold to stay active.
+proposal-state-mismatch = "error"
 
 # Heading-parenthetical abbreviations -> the subdirectory each stands for, as in
 # `## 1. Active — 25 files (ext 14 · app 5 · process 6 · core 0)`. Corpus
@@ -464,3 +488,88 @@ max_examples = 5         # per rule, before "... +N more"
 # rule   = "*"
 # path   = "STYLE-NAMING-CONVENTIONS.md"
 # reason = "the style guide's own counter-example fixtures"
+
+# ============================================================================
+# census — the corpus against its consumers.
+#
+# Every other analyzer reads a document against a rule. This one reads the
+# normative surface against the `§`-citations the implementations write back
+# into their own source: 27,498 of them across five seats on first run, a map
+# of what the cohort believes it is implementing, which no arch instrument had
+# ever opened.
+#
+# Seats are resolved against the corpus root's PARENT — the polyrepo checkout.
+# A seat that is not present is NAMED in the run header and never silently
+# dropped: an unscanned tree and a clean tree produce byte-identical output,
+# and an absence measured against the wrong checkout is a defect this
+# ecosystem has already nearly published.
+# ============================================================================
+[analyzer.census]
+# Sibling repos whose specs/ and guides/ are part of the obligation surface.
+# Without this every `V7 §4.6` in cohort source reports as an orphan citation —
+# could-not-look wearing a verdict's clothes, which is the exact failure the
+# `address` analyzer's `--namespace-root` flag exists to prevent.
+namespace_roots = ["../entity-core-protocol"]
+
+# How the cohort spells a document in source. `V7` is the whole cohort's name
+# for the core protocol spec and accounts for ~1,000 citations in one seat; an
+# alias is the honest way to carry that, because the alternative is a large
+# bucket reported as unattributable.
+[analyzer.census.aliases]
+V7 = "ENTITY-CORE-PROTOCOL"
+"ENTITY-CORE-PROTOCOL" = "ENTITY-CORE-PROTOCOL"
+# The cohort's short name for `ENTITY-NATIVE-TYPE-SYSTEM`. It is not derivable:
+# the bare-alias rule strips `EXTENSION-`/`GUIDE-`/`SDK-`/`APP-CONVENTION-`
+# prefixes, and this document has none of them.
+"TYPE-SYSTEM" = "ENTITY-NATIVE-TYPE-SYSTEM"
+"NATIVE-TYPE-SYSTEM" = "ENTITY-NATIVE-TYPE-SYSTEM"
+"CBOR-ENCODING" = "ENTITY-CBOR-ENCODING"
+
+[analyzer.census.rules]
+# A seat cites a section this corpus does not have. `address` finds this for
+# documents citing documents; this finds it for CODE citing documents, which
+# is the direction that reaches an implementer working from a stale reading.
+orphan-citation = "error"
+# The section's newest line is newer than the last commit touching the file
+# that cites it: the spec moved and the implementation has not been opened
+# since. `--drift` only.
+spec-moved-under = "error"
+# Normative tokens, cited by product code, gated by no oracle check. The FM-1
+# class — §4.7 declares ten MUST-emit rows and roughly one is driven.
+unobserved-must = "warn"
+# Normative tokens and no citation anywhere. Deliberately not an error: plenty
+# of correct code cites nothing. It is a reading list, ordered by MUST density.
+uncited-section = "warn"
+
+[analyzer.census.seats.entity-core-go]
+path = "entity-core-go"
+source = ["*.go"]
+skip = ["/vendor/", "/.git/"]
+# The conformance oracle inside this seat. The product/oracle split is the
+# whole point: a section cited only by product code is implemented-and-ungated,
+# which is a different and more urgent state than uncited.
+oracle_paths = ["cmd/internal/validate/"]
+
+[analyzer.census.seats.entity-core-rust]
+path = "entity-core-rust"
+source = ["*.rs"]
+skip = ["/target/", "/.git/"]
+oracle_paths = ["conformance/", "tests/conformance"]
+
+[analyzer.census.seats.entity-core-py]
+path = "entity-core-py"
+source = ["*.py"]
+skip = ["/.venv/", "/.git/", "__pycache__"]
+oracle_paths = ["conformance/", "tests/conformance"]
+
+[analyzer.census.seats.entity-browser-rust]
+path = "entity-browser-rust"
+source = ["*.rs"]
+skip = ["/target/", "/.git/"]
+oracle_paths = ["tools/e2e/"]
+
+[analyzer.census.seats.entity-workbench-go]
+path = "entity-workbench-go"
+source = ["*.go"]
+skip = ["/vendor/", "/.git/"]
+oracle_paths = ["tools/e2e/"]

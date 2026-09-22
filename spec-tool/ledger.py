@@ -53,6 +53,57 @@ The rules:
                              declaration over an absent directory passes; it
                              was guarding nothing to begin with.
 
+  proposal-state-mismatch    A proposal's own `**Status:**` header says the
+                             spec edit LANDED while the file sits in
+                             `active/`. **State is the directory; the two
+                             disagree.**
+
+                             **This is the blind spot the count rules are
+                             structurally unable to see, and the ledger
+                             document itself named it.** `docs/proposals/
+                             INDEX.md` records a case where *"the ledger moved
+                             and the file did not"* and draws the conclusion:
+                             *"a folded proposal sitting in `active/` is
+                             arithmetically invisible"* — both totals agree,
+                             because the file is still there and still counted
+                             — *"the checkable property is not the count but
+                             the disagreement between a file's own `Status:`
+                             and the directory it sits in. Cheap, mechanical,
+                             and it would have fired on 08-16."* It was filed
+                             as a gate ask and never built. This is it.
+
+                             **Why it is not directory tidiness.** `active/`
+                             means *work is owed*. A folded proposal left there
+                             inflates the backlog with work already done, and a
+                             backlog that overstates itself is one nobody
+                             trusts or reads. Measured on the live corpus at
+                             first run: **9 of 39 active proposals declared a
+                             landed fold**, overstating the owed set by roughly
+                             a quarter.
+
+                             **A hold is declared, not inferred.** L3 requires
+                             a *partial* fold to stay active, so the rule fires
+                             only where the document offers no hold marker
+                             (`partial`, `stays active`, `stays in active/`,
+                             `until the cohort`). That makes a legitimately
+                             held proposal an **auditable exemption** rather
+                             than a case the gate guesses at — the same posture
+                             as the commit trailers, on the principle that an
+                             exemption nobody can audit is not an exemption.
+                             Calibrated live: 3 of the 12 fold-declaring
+                             proposals carry a hold marker and are correctly
+                             silent.
+
+                             **It does NOT check that the fold is complete**,
+                             and that limit is the point. A `Status:` header is
+                             an artifact, and reading one as a conclusion about
+                             the spec tree is the error this corpus catalogues
+                             most. The gate reports a **disagreement to
+                             adjudicate**; whether every delta row landed is a
+                             per-row read against the specs, and moving a file
+                             on this gate's say-so alone would commit the exact
+                             defect L3 was ratified on.
+
 What it does NOT read, stated so a green run is not read as more than it is.
 Only counts **anchored to a directory** are checkable: the backticked-path form
 and the heading form whose state word names a directory (plus that heading's
@@ -102,6 +153,11 @@ HEAD_COUNT_RE = re.compile(r"^#{1,6}\s*\d+[a-z]?\.\s*([A-Za-z][A-Za-z-]*)\s*[—
 # heading. Each token is resolved through `[analyzer.ledger.aliases]`.
 PAREN_RE = re.compile(r"\(([^)]*)\)")
 PAREN_ITEM_RE = re.compile(r"([A-Za-z][A-Za-z-]*)\s+(\d+)")
+
+# `**Status:** DRAFT — folded at authoring. …` — a proposal's self-declared
+# state. Matched at the head of a line so a `Status:` quoted mid-prose (several
+# proposals quote *another* document's header) is not read as this file's own.
+STATUS_RE = re.compile(r"^\*\*Status:?\*\*\s*(.+)$", re.MULTILINE)
 
 
 class Finding:
@@ -191,6 +247,82 @@ def analyze(text: str, base: Path) -> List[Finding]:
     return sorted(findings, key=lambda f: (f.line, f.rule))
 
 
+# A status declaring the spec edit LANDED. Deliberately narrow: these are words
+# about *this* proposal's disposition, not about a fold in general.
+#
+# `after the fold` earns its place by measurement, not by imagination. The first
+# run of this rule scored 6 where a hand count had found 9, and all three misses
+# were the same sentence — *"reference proposal, written after the fold"* — which
+# is this corpus's **house idiom** for a proposal authored to record a fold that
+# already happened. Matching only the participle (`folded`) missed the noun, and
+# the noun is how the standard phrasing says it. **The marker list is calibrated
+# against the corpus's actual vocabulary, not against the words a rule-writer
+# expects**; that is the difference between a gate and a guess.
+FOLD_MARKERS = ("folded", "fold landed", "after the fold", "post-fold",
+                "executed", "implemented", "ratified")
+
+# An explicit, auditable declaration that the file belongs in `active/` anyway.
+# L3 requires a partial fold to stay active, so this is not an escape hatch —
+# it is the rule's other half, and it is DECLARED rather than guessed.
+HOLD_MARKERS = ("partial", "stays active", "stays in `active/`", "stays in active/",
+                "until the cohort", "not yet folded", "unfolded", "reopened")
+
+
+def status_of(text: str) -> Optional[str]:
+    """The proposal's own `**Status:**` line, or None. First match only: a
+    proposal that quotes another document's header later is not redeclaring
+    its own state."""
+    m = STATUS_RE.search(text)
+    return m.group(1).strip() if m else None
+
+
+def state_finding(text: str, path: Path) -> Optional[Finding]:
+    """`active/` means work is owed. A status saying the edit landed contradicts
+    the directory — unless the document declares a hold, which L3 requires for a
+    partial fold.
+
+    Returns the finding, or None. Adjudication is deliberately *not* a claim
+    that the fold is complete — see the module docstring.
+    """
+    status = status_of(text)
+    if status is None:
+        return None
+    low = status.lower()
+    if not any(m in low for m in FOLD_MARKERS):
+        return None
+    if any(m in low for m in HOLD_MARKERS):
+        return None
+    line = text[:text.index(status)].count("\n") + 1
+    return Finding(
+        "proposal-state-mismatch", line,
+        "sits in `active/` (work owed); its own status declares the edit "
+        "landed: \"%s\" — state is the directory. Verify every delta row "
+        "against the specs, then move it or declare the hold"
+        % (status[:110] + ("…" if len(status) > 110 else "")))
+
+
+def iter_proposals(base: Path) -> List[Path]:
+    """Proposal files under `active/`, the only state whose meaning this rule
+    can contradict. `implemented/` holding a DRAFT header is not a defect — a
+    reference proposal written after its own fold says exactly that."""
+    active = base / "active"
+    return sorted(active.rglob("*.md")) if active.is_dir() else []
+
+
+def analyze_states(base: Path) -> List[Tuple[Path, Finding]]:
+    """(proposal path, finding) so each is reported against its own file — the
+    defect is in the proposal, not in the document that counts it."""
+    out: List[Tuple[Path, Finding]] = []
+    for p in iter_proposals(base):
+        try:
+            f = state_finding(p.read_text(encoding="utf-8"), p)
+        except Exception:  # noqa: BLE001
+            continue
+        if f is not None:
+            out.append((p, f))
+    return out
+
+
 def rel(p: Path) -> str:
     try:
         return str(p.relative_to(Path.cwd()))
@@ -226,11 +358,18 @@ def run_check(roots: List[Path], as_json: bool) -> int:
 
     report: Dict[str, List[Finding]] = {}
     n_claims = 0
+    n_proposals = 0
     for doc, text in docs:
         n_claims += len(claims(text, doc.parent))
         f = analyze(text, doc.parent)
         if f:
             report[rel(doc)] = f
+        # The state rule reads the proposals themselves, beside the document
+        # that counts them: the count rules can never see a folded proposal
+        # sitting in `active/`, because both totals agree about it.
+        n_proposals += len(iter_proposals(doc.parent))
+        for prop, sf in analyze_states(doc.parent):
+            report.setdefault(rel(prop), []).append(sf)
 
     n_error = sum(1 for fs in report.values() for x in fs if x.severity() == "error")
 
@@ -238,7 +377,8 @@ def run_check(roots: List[Path], as_json: bool) -> int:
         out = {rp: [{"rule": x.rule, "severity": x.severity(), "line": x.line,
                      "text": x.text} for x in fs] for rp, fs in report.items()}
         print(json.dumps({"summary": {"errors": n_error, "files": len(report),
-                                      "scanned": len(docs), "claims": n_claims},
+                                      "scanned": len(docs), "claims": n_claims,
+                                      "proposals": n_proposals},
                           "findings": out}, indent=2))
         return 1 if n_error else 0
 
@@ -250,8 +390,9 @@ def run_check(roots: List[Path], as_json: bool) -> int:
 
     # The claim count is part of the answer: 0 findings over 0 claims is a
     # pattern that stopped matching, not a document that came out true.
-    print("\nscanned %d ledger doc(s), %d anchored claim(s) — %d file(s) flagged, %d error(s)."
-          % (len(docs), n_claims, len(report), n_error))
+    print("\nscanned %d ledger doc(s), %d anchored claim(s), %d active proposal(s) — "
+          "%d file(s) flagged, %d error(s)."
+          % (len(docs), n_claims, n_proposals, len(report), n_error))
     return 1 if n_error else 0
 
 
