@@ -17,6 +17,7 @@ that reads the one shared model (`model.py`) and the one config
     spec corpus [--root …|--vendor …|--json]               test-vector artifact gate
     spec convergence [--window N|--json]                   spec rate-of-change + pipeline
     spec charter [--charter …|--agents …|--json]           the discipline set, both homes
+    spec expiry  [--gate|--owed|--json]                    tracker rows whose EVIDENCE died
     spec ledger [--root …|--json]                          declared counts vs the directories
     spec register [--gate|--owed|--json]                   design docs findable by the QUESTION
     spec inbound [--gate|--owed|--peers D|--json]          packets addressed to us vs our ledger
@@ -68,6 +69,7 @@ import corpus
 import coverage
 import census
 import charter
+import expiry
 import ledger
 import inbound
 import inventory
@@ -98,6 +100,7 @@ DELEGATES = {
     "coverage": coverage.main,
     "census": census.main,
     "charter": charter.main,
+    "expiry": expiry.main,
     "ledger": ledger.main,
     "inbound": inbound.main,
     "inventory": inventory.main,

@@ -589,6 +589,65 @@ p_case("gating_eligibility_set_is_still_the_union",
        set(standards.BASELINE_RULES)
        == set(standards.NARRATIVE_RULES) | set(standards.PUBLISHED_LEAK_RULES))
 
+# (16) THE DECLARATION IS THE SCOPE. `published-narrative` scored every `.md`
+#      under `docs/` that was not on a hardcoded name list, so each NEW
+#      undeclared root-level document arrived as a pile of false leaks — an
+#      internal vision document opened at 25 errors against a file that
+#      publishes nowhere. The config already stated the correct rule
+#      (*"an undeclared file is out of a published-narrative scope by
+#      construction"*) and implemented it as a list of the filenames that
+#      existed the day it was written.
+#
+#      Asserted in BOTH directions, because the dangerous failure here is the
+#      OTHER one: a scope that reads the keep-list wrongly (wrong base path,
+#      unexpanded keep_tree) yields the empty set and reports a serene 0
+#      errors over a surface it never opened.
+print("\n  -- the publication declaration is the scope --")
+
+import tempfile  # noqa: E402
+
+with tempfile.TemporaryDirectory() as _td:
+    _root = Path(_td)
+    (_root / "docs" / "proposals").mkdir(parents=True)
+    (_root / "CANONICAL-DOCS.toml").write_text(
+        '[[keep_tree]]\npath = "docs/proposals"\n', encoding="utf-8")
+    # declared, via a keep_tree -> must be scanned
+    (_root / "docs" / "proposals" / "PROPOSAL-A.md").write_text("x\n",
+                                                               encoding="utf-8")
+    # undeclared, sitting at docs/ root -> must NOT be scanned
+    (_root / "docs" / "VISION-INTERNAL.md").write_text("x\n", encoding="utf-8")
+
+    _prev_scope = standards.PUBLISHED_SURFACE_SCOPE
+    _prev_excl_d, _prev_excl_f = standards.EXCLUDE_DIRS, standards.EXCLUDE_FILES
+    standards.PUBLISHED_SURFACE_SCOPE = True
+    standards.EXCLUDE_DIRS, standards.EXCLUDE_FILES = set(), set()
+    try:
+        _seen = {p.name for p in standards.iter_specs(_root / "docs")}
+    finally:
+        standards.PUBLISHED_SURFACE_SCOPE = _prev_scope
+        standards.EXCLUDE_DIRS, standards.EXCLUDE_FILES = _prev_excl_d, _prev_excl_f
+
+p_case("a_keep_tree_member_is_in_scope", "PROPOSAL-A.md" in _seen)
+p_case("an_undeclared_docs_root_file_is_not", "VISION-INTERNAL.md" not in _seen)
+# The anti-vacuity guard: if the keep-list resolution broke, `_seen` would be
+# empty and the assertion above would pass for the wrong reason.
+p_case("the_declared_scope_is_not_empty", len(_seen) == 1)
+
+# And with no scope flag, nothing is filtered — the default scope must not
+# silently inherit a publication filter it never asked for.
+with tempfile.TemporaryDirectory() as _td2:
+    _r2 = Path(_td2)
+    (_r2 / "docs").mkdir(parents=True)
+    (_r2 / "CANONICAL-DOCS.toml").write_text("", encoding="utf-8")
+    (_r2 / "docs" / "ANYTHING.md").write_text("x\n", encoding="utf-8")
+    _prev_excl_d, _prev_excl_f = standards.EXCLUDE_DIRS, standards.EXCLUDE_FILES
+    standards.EXCLUDE_DIRS, standards.EXCLUDE_FILES = set(), set()
+    try:
+        _seen2 = {p.name for p in standards.iter_specs(_r2 / "docs")}
+    finally:
+        standards.EXCLUDE_DIRS, standards.EXCLUDE_FILES = _prev_excl_d, _prev_excl_f
+p_case("default_scope_applies_no_publication_filter", "ANYTHING.md" in _seen2)
+
 if FAILURES:
     print(f"\n{len(FAILURES)} failure(s):")
     for f in FAILURES:

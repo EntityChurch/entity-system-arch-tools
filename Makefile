@@ -172,6 +172,7 @@ test: compile parity
 	@$(PYTHON) spec-tool/tests/convergence_selftest.py
 	@$(PYTHON) spec-tool/tests/coverage_selftest.py
 	@$(PYTHON) spec-tool/tests/charter_selftest.py
+	@$(PYTHON) spec-tool/tests/expiry_selftest.py
 	@$(PYTHON) spec-tool/tests/ledger_selftest.py
 	@$(PYTHON) spec-tool/tests/provenance_selftest.py
 	@$(PYTHON) spec-tool/tests/sdksync_selftest.py

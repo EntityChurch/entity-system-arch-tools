@@ -67,6 +67,7 @@ Stdlib-only.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -102,9 +103,19 @@ ALIASES: Dict[str, Tuple[str, ...]] = {
 TO_FIELD = re.compile(r"\*\*\s*(?:To|TO|to)\s*:?\s*\*\*\s*([^\n]*)")
 BOLD_STOP = re.compile(r"\*\*")
 
-# A cc may be its own bold field or a parenthetical inside the To: value.
+# A cc may be its own bold field or ride inside the To: value. Three inline
+# spellings occur and all three must be stripped before the To: value is
+# tested, or a packet that merely copies us reads as addressed to us.
+#
+# The comma form was missing until 2026-09-09, when
+# `**To:** `entity-core-go` (`ext/network`), cc `entity-system-architecture``
+# scored as `to`. That over-reports what we owe.
 CC_FIELD = re.compile(r"\*\*\s*cc\s*:?\s*\*\*\s*([^\n]*)", re.I)
-CC_INLINE = re.compile(r"\(\s*cc[:\s]([^)]*)\)|—\s*cc\s+([^\n]*)", re.I)
+CC_INLINE = re.compile(
+    r"\(\s*cc[:\s]([^)]*)\)"      # (cc X)
+    r"|—\s*cc[:\s]\s*([^\n]*)"    # — cc X
+    r"|,\s*cc[:\s]\s*([^\n]*)",   # , cc X
+    re.I)
 
 # `entity-core-{go,rust,py}` — expanded so a brace list is not read as one
 # unknown seat, and so it cannot accidentally substring-match an alias.
@@ -155,7 +166,7 @@ def classify(text: str, aliases: Tuple[str, ...]) -> str:
     if cc:
         cc_parts.append(cc)
     for m in CC_INLINE.finditer(text[:4000]):
-        cc_parts.append(m.group(1) or m.group(2) or "")
+        cc_parts.append(m.group(1) or m.group(2) or m.group(3) or "")
 
     if to is not None:
         # A cc clause living inside the To: value must not make the packet read
@@ -229,6 +240,58 @@ def iter_packets(peers: Path, self_name: str) -> List[Path]:
     return found
 
 
+def dedupe_clones(packets: List[Path]) -> Tuple[List[Path], List[dict]]:
+    """Collapse byte-identical packets held by working clones of one repository.
+
+    **A packet is ONE obligation however many checkouts hold it.** This scope is
+    a directory of directories, and several of those directories are working
+    clones of the same repository at different tips — measured 2026-09-09, nine
+    of them were clones of two repos, and *every* packet in four of them was a
+    byte-identical copy of one already counted. That inflated the owed figure
+    this gate publishes by 194 -> 135, about 30%, and the inflation is invisible
+    because each copy is a real file with a real addressee block.
+
+    Canonical copy = the one under the directory holding the MOST scanned
+    packets (ties broken by name). A stale clone is a strict subset of the live
+    tree's history, so the fullest directory is the live one, and attributing
+    the obligation there is what makes the per-seat table actionable.
+
+    Deduping only ever LOWERS an accusation, which is the direction an
+    instrument reporting on five seats at once has to be wrong in.
+    """
+    per_dir: Dict[str, int] = {}
+    for p in packets:
+        per_dir[p.parents[2].name] = per_dir.get(p.parents[2].name, 0) + 1
+
+    # **The key is FILENAME + content digest, and the filename half is not
+    # decoration.** A first cut keyed on content alone and collapsed two
+    # genuinely distinct packets from ONE seat that happened to share a short
+    # body — caught by four existing assertions in the self-test, which is what
+    # that suite is for. A clone copy is the same path suffix with the same
+    # bytes; two files with different names are two packets whatever they say.
+    groups: Dict[Tuple[str, str], List[Path]] = {}
+    for p in packets:
+        try:
+            digest = hashlib.sha256(p.read_bytes()).hexdigest()
+        except OSError:
+            digest = "unreadable:%s" % p
+        groups.setdefault((p.name, digest), []).append(p)
+
+    canonical: List[Path] = []
+    collapsed: List[dict] = []
+    for _key, group in groups.items():
+        best = max(group, key=lambda q: (per_dir[q.parents[2].name],
+                                         q.parents[2].name))
+        canonical.append(best)
+        for other in group:
+            if other != best:
+                collapsed.append({"file": str(other),
+                                  "seat": other.parents[2].name,
+                                  "same_as": str(best)})
+    canonical.sort()
+    return canonical, collapsed
+
+
 def scan(root: Path, peers: Optional[Path] = None) -> Tuple[int, dict]:
     root = root.resolve()
     self_name = root.name
@@ -264,6 +327,7 @@ def scan(root: Path, peers: Optional[Path] = None) -> Tuple[int, dict]:
                      "reconcile packets against" % (", ".join(LEDGERS), root)}
 
     packets = iter_packets(peers, self_name)
+    packets, collapsed = dedupe_clones(packets)
     if not packets:
         return CANNOT_LOOK, {
             "error": "no %s found under any sibling's %s below %s — the scope "
@@ -319,6 +383,8 @@ def scan(root: Path, peers: Optional[Path] = None) -> Tuple[int, dict]:
         "peers": str(peers),
         "ledgers": seen_ledger,
         "scanned": len(packets),
+        "collapsed_clones": collapsed,
+        "clone_seats": sorted({c["seat"] for c in collapsed}),
         "addressed_to_us": len(owed) + len(cited),
         "cited": len(cited),
         "owed": owed,
@@ -351,6 +417,11 @@ def report(res: dict, gate: bool, owed_only: bool, unaddressed_only: bool
           "the ledger, %d owed."
           % (res["scanned"], res["peers"], res["addressed_to_us"],
              res["cited"], len(res["owed"])))
+    if res["collapsed_clones"]:
+        print("%d further file(s) are byte-identical copies of a packet already "
+              "counted, held by working clones of the same repository (%s) — a "
+              "packet is ONE obligation however many checkouts hold it."
+              % (len(res["collapsed_clones"]), ", ".join(res["clone_seats"])))
     if res["cc_owed"]:
         print("%d further packet(s) copy us without addressing us — a lower "
               "obligation, counted separately, not merged."

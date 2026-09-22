@@ -176,6 +176,22 @@ def main() -> int:
            len(res["ambiguous_citations"]) == 1
            and len(res["ambiguous_citations"][0]["matches"]) == 2, res)
 
+        # ---- 9a. all three inline cc spellings are cc, never to -----------
+        for label, line in (
+            ("paren",
+             "**To:** `entity-core-go` (cc `entity-system-architecture`)\n"),
+            ("em-dash",
+             "**To:** `entity-core-go` — cc `entity-system-architecture`\n"),
+            ("comma",
+             "**To:** `entity-core-go` (`ext/network`), "
+             "cc `entity-system-architecture` (§4.1)\n"),
+        ):
+            code, res = run(tmp, "no rows\n",
+                            {"entity-core-go": {
+                                "ROUTING-2026-09-09-x-%s.md" % label: line}})
+            ok("inline cc (%s) is cc, never to" % label,
+               not res["owed"] and len(res["cc_owed"]) == 1, res)
+
         # ---- 10. could-not-look is not a pass ----------------------------
         peers = build(tmp, "x\n", {"entity-core-go": {}})
         code, res = inbound.scan(peers / "entity-system-architecture", peers)
@@ -203,6 +219,58 @@ def main() -> int:
         ok("everything cited => clean, exit 0",
            code == inbound.CLEAN and not res["owed"] and res["cited"] == 2,
            res)
+
+        # ---- clone collapse, and it is validated in BOTH directions ------
+        # The defect: this scope is a directory of directories and several of
+        # them are working clones of one repository at different tips. Measured
+        # 2026-09-09, four clones of `entity-browser-rust` held 114 files, every
+        # one byte-identical to a packet already counted, and the published owed
+        # figure was 194 where the truth is 135.
+        body_a = TO_ARCH + "the locator gap is wider than signaling\n"
+        body_b = TO_ARCH + "a different finding entirely\n"
+        code, res = run(
+            tmp, "no citations here",
+            {"entity-browser-rust": {
+                "ROUTING-2026-08-20-e-arch-locator.md": body_a,
+                "ROUTING-2026-08-20-g-arch-other.md": body_b,
+                "ROUTING-2026-08-21-a-arch-third.md": TO_ARCH + "third\n"},
+             "br-curate": {
+                "ROUTING-2026-08-20-e-arch-locator.md": body_a,
+                "ROUTING-2026-08-20-g-arch-other.md": body_b},
+             "entity-browser-rust-apps": {
+                "ROUTING-2026-08-20-e-arch-locator.md": body_a}})
+        ok("byte-identical copies across clones collapse to one obligation",
+           len(res["owed"]) == 3 and len(res["collapsed_clones"]) == 3, res)
+        ok("the obligation attributes to the FULLEST tree, not alphabetically",
+           res["by_seat"] == {"entity-browser-rust": 3}, res["by_seat"])
+        ok("the collapsed copies name their seats",
+           res["clone_seats"] == ["br-curate", "entity-browser-rust-apps"],
+           res["clone_seats"])
+
+        # The other direction, and it is the one that matters more: two seats
+        # that genuinely file the same-named packet with DIFFERENT content are
+        # two obligations, and collapsing them would be a silent drop.
+        code, res = run(
+            tmp, "no citations here",
+            {"entity-core-go": {
+                "ROUTING-2026-08-20-e-arch-thing.md": TO_ARCH + "go's\n"},
+             "entity-core-rust": {
+                "ROUTING-2026-08-20-e-arch-thing.md": TO_ARCH + "rust's\n"}})
+        ok("same name, different bytes => two obligations, nothing collapsed",
+           len(res["owed"]) == 2 and not res["collapsed_clones"], res)
+
+        # And a clone copy must not be able to satisfy a ledger citation on its
+        # own — the citation is matched against the canonical copy's stem, so
+        # crediting is unchanged by the collapse.
+        code, res = run(
+            tmp, "we read ROUTING-2026-08-20-e-arch-locator today",
+            {"entity-browser-rust": {
+                "ROUTING-2026-08-20-e-arch-locator.md": body_a},
+             "br-curate": {
+                "ROUTING-2026-08-20-e-arch-locator.md": body_a}})
+        ok("a cited packet is still cited after collapse, and counted once",
+           res["cited"] == 1 and not res["owed"]
+           and len(res["collapsed_clones"]) == 1, res)
 
     print()
     if FAILURES:

@@ -729,14 +729,69 @@ class Finding:
         return RULES[self.rule][0]
 
 
+def _declared_set(scope_root: Path):
+    """The publication declaration as ABSOLUTE paths, or None.
+
+    Reuses `pins.declared_docs`, which already expands a `[[keep_tree]]` into
+    the prose files it publishes — the defect that once had the L24 gate
+    reading a fraction of its own surface.
+
+    **Two mismatches to keep straight, and getting either wrong silently
+    empties the scope.** A scope root is `<corpus>/docs`, while the keep-list
+    lives at `<corpus>/CANONICAL-DOCS.toml` and its entries are relative to
+    `<corpus>` — so the corpus root is found by walking up, and the result is
+    normalised to absolute paths rather than compared across two different
+    bases.
+
+    **None means no declaration was found at all**, which is a could-not-look
+    and must never be read as "nothing publishes".
+    """
+    try:
+        import pins  # same package dir
+    except Exception:  # noqa: BLE001
+        return None
+    corpus = None
+    for cand in [scope_root, *scope_root.parents]:
+        if (cand / "CANONICAL-DOCS.toml").is_file():
+            corpus = cand
+            break
+    if corpus is None:
+        return None
+    try:
+        decl = pins.declared_docs(corpus)
+    except Exception:  # noqa: BLE001
+        return None
+    if decl is None:
+        return None
+    return {str((corpus / rel).resolve()) for rel in decl}
+
+
 def iter_specs(root: Path):
     if root.is_file():
         yield root
         return
+
+    # **In a published-narrative scope the DECLARATION is the scope.** The
+    # config has always said so — *"an undeclared file is out of a
+    # published-narrative scope by construction"* — and then implemented it as
+    # a hardcoded list of the undeclared root-level filenames that happened to
+    # exist the day it was written. So every NEW undeclared document under
+    # `docs/` was scored as a published leak: an internal vision document that
+    # publishes nowhere opened at **25 false errors**, and the only reason the
+    # five before it were quiet is that someone had typed their names in.
+    #
+    # A name list cannot express *undeclared*; only the keep-list can. Reading
+    # it directly also keeps the two from drifting, which the config's own note
+    # asks for and had no way to enforce (*"if one of them is ever declared,
+    # delete its line here"*).
+    declared = _declared_set(root) if PUBLISHED_SURFACE_SCOPE else None
+
     for p in sorted(root.rglob("*.md")):
         if any(part in EXCLUDE_DIRS for part in p.parts):
             continue
         if p.name in EXCLUDE_FILES:
+            continue
+        if declared is not None and str(p.resolve()) not in declared:
             continue
         yield p
 
