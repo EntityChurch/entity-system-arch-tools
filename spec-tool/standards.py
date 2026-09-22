@@ -51,8 +51,8 @@ It never edits normative prose — inline dates / impl-team refs / proposal
 citations are reported as remaining editorial work, not auto-stripped, because
 they may sit next to load-bearing text. The source file is never modified.
 
-Boundary: the publish-time scrub (secrets, dates, license furniture) is
-`entity-core-devops/release-builder`'s job. This analyzer is spec-standards
+Boundary: the publish-time scrub (secrets, dates, license furniture) belongs to
+the release pipeline, not here. This analyzer is spec-standards
 conformance only — the quality bar, paralleling `spec style` for naming.
 
 Stdlib-only Python 3.11+. Exit code is non-zero when gating (error) violations

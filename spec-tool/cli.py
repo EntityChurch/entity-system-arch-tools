@@ -33,6 +33,7 @@ that reads the one shared model (`model.py`) and the one config
     spec vocab  [--prefix …|--owed|--gate|--json]          app-tier TYPE VOCABULARY: does the field converge?
     spec sdksync [--root …|--json|--unpinned|--update]      SDK restatements vs their sources
     spec pointers [--namespace-root R|--gate|--unpinned]    declared pointers vs the authority they name
+    spec pins [--root …|--gate|--json]                     commit citations a public reader cannot resolve
     spec provenance [--since REF|--proposal-root R|--json] L1: normative spec edit needs a proposal
     spec check                                             run all three gates (style + standards + coherence)
     spec config [CONFIG.toml]                              print the resolved config

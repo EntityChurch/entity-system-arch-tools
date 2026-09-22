@@ -92,9 +92,9 @@ coincidence, not correspondence.
   what an implementation builds from — never by us.**
   **The check is mechanical and needs no NLP:** a commit touching the §1.4 PD-2 region while leaving the
   §9 row untouched is a finding — the `provenance` two-part-trigger pattern, applied within one document.
-  **Validate against both instances in `entity-core-protocol` history (`a528d2e`, `05b7f74`) and against
-  the fold that DID move both (`dd5f785`), so it is exercised in both directions** before its first
-  number is published.
+  **Validate against both instances in `entity-core-protocol`'s history — the two-arm PD-2 opener fold
+  and the multi-signature conditional fold — and against the one fold that DID move both §1.4 and its
+  §9 restatement together, so it is exercised in both directions** before its first number is published.
   *Interim, already landed: the row now names §1.4 as its authority and states that §1.4 wins on
   disagreement — `L23`'s prescribed form. That makes the drift greppable; it does not gate it.*
 - ⛔ **`address` — `_bare_internal` never resolves a section against a document named on

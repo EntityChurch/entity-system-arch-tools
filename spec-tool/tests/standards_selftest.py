@@ -17,6 +17,7 @@ this file is what keeps the rule honest.
 Stdlib-only. Third leg of tool verification, beside parity.sh + address_selftest.
 """
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -530,7 +531,7 @@ p_case("bracketed_operator_note_is_caught",
 # Fails closed on its own input: if the pattern is reshaped so the alternation
 # cannot be read, this raises instead of quietly testing nothing. An empty
 # derived set would otherwise loop zero times and print exactly like a pass.
-_meta_alt = __import__("re").search(r"entity-\(\?:([^)]+)\)-meta", standards.INTERNAL_PATH_RE.pattern)
+_meta_alt = re.search(r"entity-\(\?:([^)]+)\)-meta", standards.INTERNAL_PATH_RE.pattern)
 if _meta_alt is None:
     raise SystemExit("standards_selftest: cannot read INTERNAL_PATH_RE's meta-repo "
                      "alternation — refusing to report a pass on an untested branch")

@@ -37,8 +37,8 @@ death. **That fix stayed a local practice in one seat and never reached the
 rule**, which is why the pin later regressed from `cc1970f` (on public
 `master`) to a `dev`-only commit with nothing objecting.
 
-Scope: `CANONICAL-DOCS.toml` is a **keep-list** — the promote pipeline's
-`canon-filter` drops every doc not declared there. So the published surface is
+Scope: `CANONICAL-DOCS.toml` is a **keep-list** — the release pipeline drops
+every doc not declared there. So the published surface is
 exactly the declared set, and that is what this reads. A `dev`-only hash in a
 git-ignored scratch note is not a defect; the same hash in a declared doc is.
 
@@ -270,7 +270,7 @@ def expand_decl(root: Path, rel: str) -> List[str]:
     """One declaration -> the prose files it publishes.
 
     A `[[keep_tree]]` declares a DIRECTORY as product; everything prose under it
-    survives `canon-filter` without a per-file entry. It is written with the same
+    survives the release filter without a per-file entry. It is written with the same
     `path = "..."` key as a single-file declaration, so a scanner that tests
     `is_file()` and moves on **silently drops the whole tree** — and reports the
     result as a pass, because the skip is invisible in a count of findings.

@@ -39,14 +39,16 @@ SINCE  ?= HEAD~1
 help:
 	@echo "the unified spec toolkit (one tool, command pathways)"
 	@echo
-	@echo "gates (exit non-zero on violations):"
-	@echo "  check           spec check (style + standards), host python3"
+	@echo "gates (exit 0 clean / 1 violations / 2 could-not-look):"
+	@echo "  check           spec check (style + standards + coherence), host python3"
 	@echo "  check-podman    same, hermetic (one container)"
 	@echo "  style           naming gate only"
 	@echo "  standards       release-readiness gate only"
+	@echo "  coherence       internal-consistency gate only (each spec against itself)"
 	@echo "  corpus          test-vector artifact gate (VENDOR=<path> diffs a vendored copy)"
 	@echo "  ledger          declared counts in INDEX.md vs the directories they name"
 	@echo "  provenance      L1: a normative spec edit must name a proposal (SINCE=<ref>)"
+	@echo "  pins            commit citations a reader of public master cannot resolve"
 	@echo "readers (informational):"
 	@echo "  convergence     spec rate-of-change + the spec->peers->generators pipeline"
 	@echo "  tree SPEC=…     structural node tree"
@@ -57,11 +59,17 @@ help:
 	@echo "  sdksync         SDK restatements vs the extension spans they copied"
 	@echo "  parity          unified CLI == golden fixtures (regression oracle)"
 	@echo "  compile         byte-compile the spec package (sanity)"
+	@echo "  build           build the podman image; clean removes it"
 	@echo "ADR-0019 Tier-1 (over the tool's own code, stdlib-only):"
-	@echo "  test            compile + parity + address self-test (the tool's suite)"
+	@echo "  test            compile + parity + every analyzer self-test"
 	@echo "  lint            byte-compile static check (no 3rd-party linter; alias of compile)"
 	@echo "  fmt             no-op — stdlib-only, no vendored autoformatter"
-	@echo "  NOTE: 'check' above is the SPEC gate (style+standards), not lint+test."
+	@echo "  clean           remove the podman image"
+	@echo "  NOTE: 'check' above is the SPEC gate, not lint+test."
+	@echo
+	@echo "Every gate and reader takes CORPUS=<path to a spec repo>; unset, they exit 2."
+	@echo "The CLI carries more commands than have make targets —"
+	@echo "  python3 spec-tool/cli.py --help  for the full list."
 
 # --- gates ---
 # All three take CORPUS=<path to a spec repo>. With CORPUS unset they run

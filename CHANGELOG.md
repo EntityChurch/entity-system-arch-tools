@@ -7,7 +7,43 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+### Changed in ways that can break an existing caller
+
+The surface this project promises to keep is the `spec` CLI — subcommand and flag names, the
+three-valued exit codes (0 clean / 1 violations / 2 could-not-look), the `--json` payloads, the
+rule identifiers, and the `config.default.toml` / `.spec-baseline.json` file schemas. **No
+subcommand, flag or exit code was removed or renamed.** Two gate *verdicts* moved, which is how
+this tool actually breaks a caller:
+
+- **`spec ledger` can now fail a corpus it passed before.** It reads the proposal files
+  themselves, beside the index that counts them, so a proposal sitting in `active/` whose own
+  `Status:` says the edit already landed (`proposal-state-mismatch`) or declares itself moot
+  (`proposal-moot-in-active`) is now an **error**. A third new rule,
+  `proposal-undated-status`, is a warning and does not gate. The count rules are unchanged —
+  this is ground the gate did not read at all before, so a corpus carrying that debt goes from
+  exit 0 to exit 1 with nothing about the corpus having changed.
+- **`spec standards` can now pass a corpus it failed before.** A baseline entry now follows a
+  file that was renamed, instead of the old path being carried forward forever while every
+  finding at the new path counts as new debt. Measured on a 40-spec corpus: the same tree and
+  the same `.spec-baseline.json` went from 11 gating errors to none, with those 11 correctly
+  read as already-accepted debt. The ratchet still refuses to raise any count.
+- **Two summary lines changed shape**, which matters only if you parse them rather than read
+  them: `ledger`'s scan line now also reports the number of active proposals, and `address`'s
+  truncation footer names the flag that prints the remainder. Exit codes and `--json` output
+  are unchanged in both.
+
 ### Added
+
+- **Sixteen new commands.** Readers and gates that read a corpus against the things *outside*
+  it rather than only against its own prose: `deps` (the declared dependency graph),
+  `census` (the normative surface against the citations its consumers actually write),
+  `vocab`, `charter`, `roster`, `sections`, `arms`, `shape`, `expiry`, `register`, `inbound`,
+  `inventory`, `declare`, `disclose`, `pointers`, and `pins` (commit citations a reader of
+  public `master` cannot resolve). Each ships with its own self-test.
+- `--owed` on `address`, printing every finding rather than six per class and a count — a
+  number read off a truncated list is not a measurement of what is owed.
+- `--scope` on `standards`, and `--proposal-root` on `provenance` for a corpus whose
+  proposals are filed in a different repository from the specs they fold into.
 
 - **`spec disclose` — does a core fold say which conformance cells it crosses?** The
   enforcement point for `GUIDE-CONFORMANCE` §5.3a: a proposal folding a normative change

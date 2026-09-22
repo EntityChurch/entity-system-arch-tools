@@ -15,6 +15,24 @@ against a corpus you point them at (`--root` / a bind-mount), so the tool and th
 repos it lints evolve independently and version-decoupled. The public repo name is
 `entity-system-arch-tools` (it was split out from the former `entity-core-architecture`).
 
+## Public surface — what this repo promises to keep
+
+**In:** the `spec` CLI — subcommand names, their flags, the three-valued exit codes (**0**
+clean · **1** violations · **2** could-not-look), the `--json` payload of any command that
+emits one, the **rule identifiers** (`impl-team-ref`, `corpus-pair-disagree`, …), and the
+`config.default.toml` / `.spec-baseline.json` file schemas. The rule ids and the baseline
+schema are surface because a corpus's own baseline file is keyed on them: rename a rule and
+somebody else's accepted debt silently stops matching.
+
+**Out:** the analyzers' human-readable report prose, everything behind `cli.py` (the
+`model.py` API, which module a subcommand delegates to, how any rule is implemented), and the
+fixture corpus under `spec-tool/tests/`.
+
+**A gate's verdict on an unchanged corpus is part of the surface too** — a new rule that can
+fail a tree which passed before, or a matching change that passes one which failed before, is
+a breaking change here even though no flag moved. That is the usual way this repo breaks a
+caller; it has never yet broken one by removing a flag.
+
 ## How we work here — tier **CORE**
 
 This repo runs the entity-OS methodology at the **Core** tier — the framework is
@@ -41,7 +59,8 @@ What binds today:
 paid for its first native discipline and it should be written down: **a gate that cannot reach
 its corpus must not be readable as a pass.** Exit codes are three-valued — 0 clean, 1
 violations, **2 could-not-look** — and a `2` was read as both a pass and a lint failure for
-months against a corpus root left behind by the repo split (fixed in `7fd538f`). The general
+months against a corpus root left behind by the repo split (fixed by the corpus-resolution
+change described under `0.8.1` in `CHANGELOG.md`). The general
 form: any tool whose output gates someone else's work must make "I didn't actually look"
 structurally distinguishable from "I looked and it was fine." The ratcheted-baseline pattern
 this repo implements (`.spec-baseline.json`, which only ever lowers a count and refuses to
