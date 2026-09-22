@@ -20,7 +20,7 @@ that reads the one shared model (`model.py`) and the one config
     spec ledger [--root …|--json]                          declared counts vs the directories
     spec census [--doc …|--drift|--gaps|--json]            normative surface vs the cohort's own citations
     spec sdksync [--root …|--json|--unpinned|--update]      SDK restatements vs their sources
-    spec provenance [--since REF|--json]                   L1: normative spec edit needs a proposal
+    spec provenance [--since REF|--proposal-root R|--json] L1: normative spec edit needs a proposal
     spec check                                             run all three gates (style + standards + coherence)
     spec config [CONFIG.toml]                              print the resolved config
 

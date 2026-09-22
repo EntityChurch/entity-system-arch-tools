@@ -53,6 +53,10 @@ The rules:
                              declaration over an absent directory passes; it
                              was guarding nothing to begin with.
 
+  proposal-undated-status    A proposal in `active/` whose status carries no
+                             date. Not a foldedness check — the cheap rung
+                             under the rule below, which reads a declaration
+                             and cannot see a header that declares nothing.
   proposal-state-mismatch    A proposal's own `**Status:**` header says the
                              spec edit LANDED while the file sits in
                              `active/`. **State is the directory; the two
@@ -268,6 +272,42 @@ HOLD_MARKERS = ("partial", "stays active", "stays in `active/`", "stays in activ
                 "until the cohort", "not yet folded", "unfolded", "reopened")
 
 
+# A NEGATED fold marker is not a fold marker, and a substring test cannot tell
+# them apart. `**Status:** DRAFT — not ratified, not folded.` contains both
+# `folded` and `ratified` and declares the exact opposite of what they mean.
+#
+# This is the same calibration failure the FOLD_MARKERS comment above records,
+# arriving from the other direction: that one missed a fold phrased as a noun,
+# this one *invents* a fold out of a denial. Both come from matching tokens
+# instead of claims. HOLD_MARKERS cannot absorb it — a hold means "landed, and
+# it stays here anyway", which is a different declaration from "not landed".
+#
+# Scoped deliberately narrowly: only a negation IMMEDIATELY preceding the
+# marker (optionally through `yet`/`been`/`fully`) is stripped, so a status like
+# "folded, but the cohort has not confirmed" still fires, correctly.
+_NEGATED_RE = re.compile(
+    r"\b(?:not|never|un|isn't|aren't|wasn't|no longer)\s*"
+    r"(?:yet\s+|been\s+|fully\s+)*"
+    r"(?=folded|fold landed|executed|implemented|ratified)")
+
+
+def _strip_negated(low: str) -> str:
+    """Remove negations and the marker they govern, so a denial cannot read as
+    a declaration. Returns the status with negated markers blanked out."""
+    out, last = [], 0
+    for m in _NEGATED_RE.finditer(low):
+        out.append(low[last:m.start()])
+        rest = low[m.end():]
+        for marker in FOLD_MARKERS:
+            if rest.startswith(marker):
+                last = m.end() + len(marker)
+                break
+        else:
+            last = m.end()
+    out.append(low[last:])
+    return "".join(out)
+
+
 def status_of(text: str) -> Optional[str]:
     """The proposal's own `**Status:**` line, or None. First match only: a
     proposal that quotes another document's header later is not redeclaring
@@ -287,7 +327,7 @@ def state_finding(text: str, path: Path) -> Optional[Finding]:
     status = status_of(text)
     if status is None:
         return None
-    low = status.lower()
+    low = _strip_negated(status.lower())
     if not any(m in low for m in FOLD_MARKERS):
         return None
     if any(m in low for m in HOLD_MARKERS):
@@ -299,6 +339,40 @@ def state_finding(text: str, path: Path) -> Optional[Finding]:
         "landed: \"%s\" — state is the directory. Verify every delta row "
         "against the specs, then move it or declare the hold"
         % (status[:110] + ("…" if len(status) > 110 else "")))
+
+
+# An ISO date anywhere in the status line. `(2026-08-21)`, `— 2026-07-13.`,
+# `DRAFT 2026-09-04` all count; the point is that SOME date is claimed, not
+# where it sits.
+STATUS_DATE_RE = re.compile(r"\b20\d{2}-\d{2}-\d{2}\b")
+
+
+def undated_finding(text: str, path: Path) -> Optional[Finding]:
+    """A bare `**Status:** DRAFT` with no date is not a state — it cannot be
+    aged, so it cannot go stale visibly, so nothing ever re-reads it.
+
+    **This rule does not detect a landed edit and does not try to.** It is the
+    cheap rung under `proposal-state-mismatch`, which reads a DECLARATION and is
+    therefore blind to a header that declares nothing. Measured 2026-09-06:
+    five `EXTENSION-REGISTRY` proposals had fully folded — at **v1.16 and
+    v1.17**, against a spec since at **v1.24** — and sat in `active/` with the
+    state gate reporting **zero**, because every one of them read exactly
+    `**Status:** DRAFT`. Every single undated proposal in that sweep was either
+    already folded or unblocked; every dated one was correctly open. A date does
+    not prove the row is live, but its absence is where the stale ones were.
+    """
+    status = status_of(text)
+    if status is None:
+        return None
+    if STATUS_DATE_RE.search(status):
+        return None
+    line = text[:text.index(status)].count("\n") + 1
+    return Finding(
+        "proposal-undated-status", line,
+        "sits in `active/` with an undated status: \"%s\" — a status with no "
+        "date cannot be aged, so it never reads as stale. Date it, or verify "
+        "its deltas and move it"
+        % (status[:80] + ("…" if len(status) > 80 else "")))
 
 
 def iter_proposals(base: Path) -> List[Path]:
@@ -315,11 +389,12 @@ def analyze_states(base: Path) -> List[Tuple[Path, Finding]]:
     out: List[Tuple[Path, Finding]] = []
     for p in iter_proposals(base):
         try:
-            f = state_finding(p.read_text(encoding="utf-8"), p)
+            txt = p.read_text(encoding="utf-8")
         except Exception:  # noqa: BLE001
             continue
-        if f is not None:
-            out.append((p, f))
+        for f in (state_finding(txt, p), undated_finding(txt, p)):
+            if f is not None:
+                out.append((p, f))
     return out
 
 

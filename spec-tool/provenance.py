@@ -130,14 +130,33 @@ def version_of(text: str) -> Optional[str]:
     return None
 
 
-def proposal_stems(root: Path) -> set:
-    """Every proposal that exists on disk, by stem. State is the directory
-    (`INDEX.md` §0), so existence is a listing rather than a parse."""
+def proposal_stems(roots: List[Path]) -> set:
+    """Every proposal that exists on disk, by stem, across every searched root.
+    State is the directory (`INDEX.md` §0), so existence is a listing rather
+    than a parse.
+
+    **This takes a LIST because the proposal need not live in the repo being
+    inspected.** `entity-core-protocol` is a corpus whose normative folds are
+    authored, ratified and filed in `entity-system-architecture` — so resolving
+    stems against the inspected repo alone reports every correctly-cited fold as
+    uncited. Measured 2026-09-06: all four `0.8.2.x` folds in that repo named
+    their proposal and all four were reported `normative-edit-without-proposal`.
+    That is could-not-look wearing a verdict's clothes, the same defect
+    `address` had before `--namespace-root`."""
     out = set()
-    for d in _PROPOSAL_DIRS:
-        base = root / d
-        if base.is_dir():
-            out.update(p.stem for p in base.rglob("PROPOSAL-*.md"))
+    seen = set()
+    for root in roots:
+        try:
+            key = root.resolve()
+        except OSError:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        for d in _PROPOSAL_DIRS:
+            base = root / d
+            if base.is_dir():
+                out.update(p.stem for p in base.rglob("PROPOSAL-*.md"))
     return out
 
 
@@ -168,7 +187,9 @@ def analyze_commit(root: Path, sha: str, stems: set) -> List[Finding]:
 
     declared = [m.group(1) for m in TRAILER_RE.finditer(msg)]
     carved = [d for d in declared if d in _CARVE_OUTS]
-    named = [n for n in PROPOSAL_NAME_RE.findall(msg) if n in stems]
+    mentioned = PROPOSAL_NAME_RE.findall(msg)
+    named = [n for n in mentioned if n in stems]
+    unresolved = [n for n in mentioned if n not in stems]
 
     files = [f for f in (git(root, "show", "--format=", "--name-only", sha) or "").split()
              if f.startswith(_SPEC_PREFIX) and f.endswith(".md")]
@@ -213,6 +234,28 @@ def analyze_commit(root: Path, sha: str, stems: set) -> List[Finding]:
                 "%s (%s) declares `Spec-Change: %s`, which is not a configured "
                 "carve-out %s" % (path, "; ".join(why), declared[0], _CARVE_OUTS)))
             continue
+        # A message that NAMES a proposal the gate could not find is ambiguous
+        # between a FABRICATED citation and one filed in a repo nobody told the
+        # gate about — and it cannot tell them apart without operator input.
+        # **It stays the same finding at the same severity**, because the safe
+        # default is the accusing one: an earlier draft of this split demoted
+        # the unresolved case to `info` and thereby made an invented proposal
+        # name an escape hatch, which this file's own
+        # "named but absent from disk does NOT satisfy" case caught. What
+        # changes is the TEXT — it names the unresolved stem and the remedy, so
+        # the could-not-look reading is in front of the reader who can act on
+        # it. Measured 2026-09-06: all four `entity-core-protocol` 0.8.2.x folds
+        # cited their proposal correctly and read as uncited, because those
+        # proposals are filed in `entity-system-architecture`.
+        if unresolved:
+            out.append(Finding(
+                "normative-edit-without-proposal", sha,
+                "%s (%s) names `%s`, which is in none of the searched proposal "
+                "roots (%d proposal(s) found). Either the citation is wrong, or "
+                "this corpus's proposals are filed in another repo — pass "
+                "--proposal-root <repo> before reading this as a missing "
+                "proposal" % (path, "; ".join(why), unresolved[0], len(stems))))
+            continue
         out.append(Finding(
             "normative-edit-without-proposal", sha,
             "%s (%s) names no proposal and declares no carve-out — the rationale "
@@ -220,7 +263,8 @@ def analyze_commit(root: Path, sha: str, stems: set) -> List[Finding]:
     return out
 
 
-def run_check(root: Path, since: str, as_json: bool) -> int:
+def run_check(root: Path, since: str, as_json: bool,
+              proposal_roots: Optional[List[Path]] = None) -> int:
     if git(root, "rev-parse", "--git-dir") is None:
         print("not a git repository (or git unavailable): %s" % root, file=sys.stderr)
         print("  this gate reads CHANGES, not text — it cannot look here.", file=sys.stderr)
@@ -236,7 +280,8 @@ def run_check(root: Path, since: str, as_json: bool) -> int:
         return 2
 
     shas = rng.split()
-    stems = proposal_stems(root)
+    roots = [root] + list(proposal_roots or [])
+    stems = proposal_stems(roots)
     findings: List[Finding] = []
     for sha in shas:
         findings.extend(analyze_commit(root, sha, stems))
@@ -247,6 +292,7 @@ def run_check(root: Path, since: str, as_json: bool) -> int:
     if as_json:
         print(json.dumps({
             "summary": {"commits": len(shas), "since": since, "proposals": len(stems),
+                        "proposal_roots": [str(r) for r in roots],
                         "errors": n_error, "warnings": n_warn},
             "findings": [{"rule": f.rule, "severity": f.severity(),
                           "commit": f.commit[:7], "text": f.text} for f in findings],
@@ -261,6 +307,7 @@ def run_check(root: Path, since: str, as_json: bool) -> int:
     # range that resolved to nothing, not a clean history.
     print("\nscanned %d commit(s) since %s, %d proposal(s) on disk — %d error(s), %d warning(s)."
           % (len(shas), since, len(stems), n_error, n_warn))
+    print("proposal roots searched: %s" % ", ".join(str(r) for r in roots))
     if n_warn and not n_error:
         print("warn-only: L1 is ratcheting. Promote to error in "
               "[analyzer.provenance.rules] once the reconstruction ledger burns down.")
@@ -272,9 +319,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--since", default=_DEFAULT_SINCE, help="base ref (default: %(default)s)")
     ap.add_argument("--root", type=Path, help="repo to inspect (default: the corpus)")
+    ap.add_argument("--proposal-root", type=Path, action="append", metavar="REPO",
+                    help="an ADDITIONAL repo whose docs/proposals/ files this corpus's "
+                         "proposals; repeatable. Without it, a corpus whose folds are "
+                         "authored in a sibling repo reports every correctly-cited "
+                         "commit as uncited")
     ap.add_argument("--json", action="store_true", help="emit JSON")
     args = ap.parse_args(argv)
-    return run_check(args.root or _CFG.corpus_dir, args.since, args.json)
+    return run_check(args.root or _CFG.corpus_dir, args.since, args.json,
+                     args.proposal_root)
 
 
 if __name__ == "__main__":

@@ -69,7 +69,7 @@ with tempfile.TemporaryDirectory() as tmp:
     (pdir / "PROPOSAL-FIXTURE-THING.md").write_text("# p", encoding="utf-8")
 
     base = commit(root, "1.0", "A peer SHOULD do the thing.", "init")
-    stems = provenance.proposal_stems(root)
+    stems = provenance.proposal_stems([root])
     ok("proposal existence is a directory listing", "PROPOSAL-FIXTURE-THING" in stems)
 
     def case(name, version, body, msg, want_rule, want):
@@ -171,6 +171,50 @@ with tempfile.TemporaryDirectory() as tmp:
                          capture_output=True, text=True).stdout.strip()
     ok("a non-specs/ file with MUSTs is out of scope",
        provenance.analyze_commit(root, sha, stems) == [])
+
+    # --- the sibling-repo resolution gap, and BOTH directions of it ---------
+    #
+    # `entity-core-protocol` is a corpus whose normative folds are authored and
+    # filed in `entity-system-architecture`. Resolving stems against the
+    # inspected repo alone reported all four of its 0.8.2.x folds as uncited
+    # while every one of them named its proposal correctly. A gate is validated
+    # in both directions: a known-BAD input goes red AND a known-GOOD input goes
+    # green — and the second is the half that catches a reference answer.
+    print("sibling proposal roots")
+    sib = root / "sibling"
+    sdir = sib / "docs" / "proposals" / "implemented" / "core"
+    sdir.mkdir(parents=True)
+    (sdir / "PROPOSAL-LIVES-NEXT-DOOR.md").write_text("# p", encoding="utf-8")
+
+    sha_sib = commit(root, "3.0", musts(9), "spec: fold PROPOSAL-LIVES-NEXT-DOOR")
+
+    # KNOWN-BAD: the root is not searched, so the gate cannot tell a
+    # sibling-filed proposal from an invented one. It stays at the SAME
+    # severity — demoting it would make a fabricated name an escape hatch —
+    # and what changes is that the text carries the unresolved stem and the
+    # remedy, so the could-not-look reading reaches the reader who can act.
+    got_r = [f for f in provenance.analyze_commit(root, sha_sib, stems) if f.rule == R]
+    ok("an unresolved citation still fires — no severity hole", len(got_r) == 1,
+       "got %d" % len(got_r))
+    ok("...and the finding names the unresolved proposal",
+       bool(got_r) and "PROPOSAL-LIVES-NEXT-DOOR" in got_r[0].text)
+    ok("...and names the remedy rather than only the accusation",
+       bool(got_r) and "--proposal-root" in got_r[0].text)
+    ok("...and does NOT claim the commit named no proposal",
+       bool(got_r) and "names no proposal" not in got_r[0].text)
+
+    # KNOWN-GOOD: with the root supplied it resolves and nothing fires at all.
+    stems_both = provenance.proposal_stems([root, sib])
+    ok("a sibling root is unioned in", "PROPOSAL-LIVES-NEXT-DOOR" in stems_both)
+    ok("...and the local root is still searched", "PROPOSAL-FIXTURE-THING" in stems_both)
+    ok("a correctly-cited fold goes GREEN once its root is searched",
+       provenance.analyze_commit(root, sha_sib, stems_both) == [])
+
+    # The anti-dodge: a commit naming NOTHING is still the L1 finding, whatever
+    # roots are searched. Without this, widening resolution could silently
+    # disarm the gate it was meant to un-blind.
+    case("ANTI-DODGE: naming no proposal at all still fires L1",
+         "3.1", musts(10), "spec: no citation here", R, 1)
 
     print("could-not-look")
     rc = provenance.run_check(root, "no-such-ref", as_json=False)

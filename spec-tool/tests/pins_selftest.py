@@ -127,6 +127,44 @@ with tempfile.TemporaryDirectory() as tmp:
        code == pins.CLEAN and res["docs_scanned"] == 1,
        "scanned=%r findings=%r" % (res.get("docs_scanned"), res.get("findings")))
 
+    print("\nkeep_tree — a declared DIRECTORY publishes, and must be scanned")
+    # The defect this covers: `[[keep_tree]] path = "docs/proposals"` uses the
+    # same key as a file declaration, so `is_file()` dropped it silently and the
+    # gate reported clean over 169 unread published documents.
+    commit(home, "declare a tree", **{
+        "CANONICAL-DOCS.toml": 'path = "D.md"\npath = "tree"\n',
+        "D.md": "# D\n\nclean.\n",
+        "tree__a.md": "# A\n\npinned at `%s`.\n" % sib_dev,
+        "tree__nested__b.md": "# B\n\nalso `%s`.\n" % sib_dev,
+        "tree__archive__old.md": "# old\n\n`%s`\n" % sib_dev,
+        "tree__notes.txt": "`%s`\n" % sib_dev})
+    code, res = run(home, [sib])
+    files = {f["file"] for f in res["findings"]}
+    ok("a keep_tree directory is expanded, not skipped",
+       code == pins.VIOLATIONS and "tree/a.md" in files,
+       "scanned=%r findings=%r" % (res.get("docs_scanned"), res.get("findings")))
+    ok("expansion is recursive", "tree/nested/b.md" in files, "got %r" % files)
+    ok("dev-history dirs under a keep_tree stay out",
+       "tree/archive/old.md" not in files, "got %r" % files)
+    ok("non-prose files are not scanned", "tree/notes.txt" not in files,
+       "got %r" % files)
+    ok("the declared count reflects FILES, not declarations",
+       res["docs_declared"] == 3 and res["docs_scanned"] == 3,
+       "declared=%r scanned=%r" % (res.get("docs_declared"),
+                                   res.get("docs_scanned")))
+    # The positive control. A gate is validated in BOTH directions — a known-bad
+    # input must go red AND a known-good one must go green — because a negative
+    # control alone cannot tell you the pass condition is right.
+    commit(home, "tree is clean", **{
+        "tree__a.md": "# A\n\nclean.\n",
+        "tree__nested__b.md": "# B\n\nclean.\n"})
+    code, res = run(home, [sib])
+    ok("a clean keep_tree passes, and is still counted as scanned",
+       code == pins.CLEAN and res["docs_scanned"] == 3,
+       "scanned=%r findings=%r" % (res.get("docs_scanned"), res.get("findings")))
+    commit(home, "restore single-file declaration", **{
+        "CANONICAL-DOCS.toml": 'path = "D.md"\n'})
+
     print("\nthree-valued contract — scanning nothing is not passing")
     code, res = run(home, [sib], branch="no-such-branch")
     ok("an absent published branch is 2, not a wall of red",

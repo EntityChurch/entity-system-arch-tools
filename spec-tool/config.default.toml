@@ -317,6 +317,11 @@ declared-count-dangling = "error"
 # done. A hold is DECLARED (partial / stays active / until the cohort),
 # never inferred: L3 requires a partial fold to stay active.
 proposal-state-mismatch = "error"
+# The cheap rung under the rule above. `warn`, not `error`: it does not detect a
+# defect, it detects an unageable claim — and the burn-down is a handful of files
+# rather than a sweep, so it should be visible without gating a push. Promote to
+# error once the count reaches zero and the habit is "a status carries a date".
+proposal-undated-status = "warn"
 
 # Heading-parenthetical abbreviations -> the subdirectory each stands for, as in
 # `## 1. Active — 25 files (ext 14 · app 5 · process 6 · core 0)`. Corpus

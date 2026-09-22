@@ -106,7 +106,16 @@ from typing import Dict, List, Optional, Tuple
 TOKEN = re.compile(r"`([0-9a-f]{7,40})`")
 
 # CANONICAL-DOCS.toml declares paths as `path = "..."` or `file = "..."`.
+# A declaration is a FILE or a DIRECTORY: `[[keep_tree]]` declares a whole
+# directory as product, and everything prose under it publishes. Both spellings
+# use `path`, so the two are indistinguishable here and must both be honoured —
+# see `expand_decl`.
 DECL = re.compile(r'(?:path|file)\s*=\s*"([^"]+)"')
+
+# Directories that never publish even under a `keep_tree`, matching the promote
+# pipeline: dev history, scratch, and vendored trees.
+DECL_SKIP_DIRS = {".git", "__pycache__", "node_modules", "archive", "archived",
+                  "deprecated", "status"}
 
 # Words that are hex-shaped but never SHAs. Extend as the corpus teaches; each
 # entry should be a real false positive someone actually hit.
@@ -179,9 +188,47 @@ def declared_docs(root: Path) -> Optional[List[str]]:
     if not c.is_file():
         return None
     try:
-        return DECL.findall(c.read_text(encoding="utf-8"))
+        raw = DECL.findall(c.read_text(encoding="utf-8"))
     except OSError:
         return None
+    out: List[str] = []
+    seen = set()
+    for rel in raw:
+        for p in expand_decl(root, rel):
+            if p not in seen:
+                seen.add(p)
+                out.append(p)
+    return out
+
+
+def expand_decl(root: Path, rel: str) -> List[str]:
+    """One declaration -> the prose files it publishes.
+
+    A `[[keep_tree]]` declares a DIRECTORY as product; everything prose under it
+    survives `canon-filter` without a per-file entry. It is written with the same
+    `path = "..."` key as a single-file declaration, so a scanner that tests
+    `is_file()` and moves on **silently drops the whole tree** — and reports the
+    result as a pass, because the skip is invisible in a count of findings.
+
+    That is exactly what this gate did until 2026-09-07: `docs/proposals` and
+    `docs/research/explorations` are two declarations holding **169 published
+    documents**, and the run said `95 declared, 93 scanned` with no indication
+    that the two unscanned entries were the largest part of the surface. The
+    L24 gate had never read most of the surface it was built to check — the
+    could-not-look-as-clean shape this toolkit keeps re-earning, this time in
+    the tool written against it.
+    """
+    p = root / rel
+    if p.is_file():
+        return [rel]
+    if not p.is_dir():
+        return []
+    found = []
+    for f in sorted(p.rglob("*.md")):
+        if any(part in DECL_SKIP_DIRS for part in f.relative_to(root).parts):
+            continue
+        found.append(str(f.relative_to(root)))
+    return found
 
 
 def scan(root: Path, branch: str, siblings: List[Path]) -> Tuple[int, dict]:

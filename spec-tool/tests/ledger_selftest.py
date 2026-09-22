@@ -149,6 +149,25 @@ with tempfile.TemporaryDirectory() as tmp:
                  "DRAFT — folded, then reopened; the pin is withdrawn"):
         ok("held: %s" % held[:46], state(held) is None, "fired on a declared hold")
 
+    # The mirror of the first-run miss, found 2026-09-06 when the rule fired on
+    # a brand-new DRAFT that said, in terms, that it had NOT landed. A negated
+    # marker is not a marker; a substring test cannot tell a claim from its
+    # denial. HOLD_MARKERS cannot absorb these — a hold declares "landed, and it
+    # stays here anyway", which is a different statement from "not landed".
+    print("  a negated fold marker is not a fold marker")
+    for denied in ("DRAFT — 2026-09-06. First pass. **Not ratified, not folded.**",
+                   "DRAFT (2026-09-06) — not yet implemented",
+                   "DRAFT (2026-09-06) — never folded",
+                   "DRAFT (2026-09-06) — not executed"):
+        ok("denial: %s" % denied[:46], state(denied) is None,
+           "read a denial as a declaration")
+
+    # The other direction, and it is the one that keeps the fix honest: a
+    # negation that does NOT govern the marker must leave the finding intact.
+    ok("a negation elsewhere in the line still fires",
+       state("FOLDED (2026-09-06) — folded, but the cohort has not confirmed")
+       is not None)
+
     print("  scope and provenance")
     ok("a `Status:` quoted mid-prose is not read as this file's own state",
        ledger.state_finding(
@@ -172,11 +191,55 @@ with tempfile.TemporaryDirectory() as tmp:
             "**Status:** DRAFT — reference proposal, written after the fold.\n",
             encoding="utf-8")
         found = ledger.analyze_states(b2)
+        # Assert the set of adjudicated FILES, not the count of findings — the
+        # intent is "implemented/ is never adjudicated", and one file may raise
+        # more than one rule. The count form broke the day a second rule was
+        # added, which is the tell that it was measuring the wrong thing.
         ok("only `active/` is adjudicated; implemented/ is not a defect",
-           len(found) == 1 and found[0][0].name == "A.md",
-           "got %r" % [p.name for p, _ in found])
+           {p.name for p, _ in found} == {"A.md"},
+           "got %r" % sorted(p.name for p, _ in found))
         ok("the finding is reported against the proposal, not the index",
            found and found[0][1].rule == "proposal-state-mismatch")
+
+    # proposal-undated-status — the cheap rung under the rule above, and the
+    # reason it exists: five folded REGISTRY proposals sat in `active/` while
+    # the state gate reported zero, because every one read exactly
+    # `**Status:** DRAFT` and a rule that reads a DECLARATION cannot see a
+    # header that declares nothing.
+    print("proposal-undated-status")
+
+    def undated(status):
+        return ledger.undated_finding("# T\n\n**Status:** %s\n" % status,
+                                      Path("PROPOSAL-X.md"))
+
+    ok("a bare DRAFT is undated", undated("DRAFT") is not None)
+    ok("...and the finding names the rule",
+       undated("DRAFT").rule == "proposal-undated-status")
+    ok("a parenthesised ISO date satisfies it", undated("DRAFT (2026-08-21)") is None)
+    ok("an em-dashed one does too", undated("DRAFT — 2026-07-13.") is None)
+    ok("a date anywhere in the line counts, not just at the end",
+       undated("DRAFT 2026-09-04 · living document") is None)
+    ok("prose with no date does NOT satisfy it — the exact five-proposal shape",
+       undated("DRAFT — fourth pass, refined on a peer's answers (`8cd3010`)") is not None)
+    ok("a commit-ish hex is not a date", undated("DRAFT (8cd3010)") is not None)
+    ok("no status header is silent, never a guess",
+       ledger.undated_finding("# T\n\nno header here\n", Path("P.md")) is None)
+
+    # It is INDEPENDENT of the state rule: a folded-and-undated proposal must
+    # raise both, or fixing one would silence the other.
+    with tempfile.TemporaryDirectory() as t3:
+        b3 = Path(t3)
+        (b3 / "active" / "extensions").mkdir(parents=True)
+        (b3 / "active" / "extensions" / "C.md").write_text(
+            "**Status:** DRAFT — folded at authoring.\n", encoding="utf-8")
+        (b3 / "active" / "extensions" / "D.md").write_text(
+            "**Status:** DRAFT (2026-09-06)\n", encoding="utf-8")
+        rules = sorted(f.rule for _, f in ledger.analyze_states(b3))
+        ok("a folded+undated proposal raises BOTH rules, not one",
+           rules == ["proposal-state-mismatch", "proposal-undated-status"],
+           "got %r" % rules)
+        ok("...and a dated, honestly-open proposal raises neither",
+           not [f for pth, f in ledger.analyze_states(b3) if pth.name == "D.md"])
 
     # ----------------------------------------------------------------------
     # The three-valued contract: scanning nothing is not passing.
