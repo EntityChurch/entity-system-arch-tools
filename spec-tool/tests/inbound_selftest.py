@@ -272,6 +272,40 @@ def main() -> int:
            res["cited"] == 1 and not res["owed"]
            and len(res["collapsed_clones"]) == 1, res)
 
+    # -- a stem with an internal dot is citable ----------------------------
+    # `ROUTING-2026-08-04-s10.3-seam-...` names a spec SECTION in its slug. The
+    # citation regex broke the segment at the dot, matched `...-08-04-s10`, and
+    # the leading-clause test then failed on `.3-seam` — so that packet was
+    # UNCITABLE by any spelling and reported `owed` however correctly the ledger
+    # named it. Measured on the live trees, not hypothetical.
+    dotted = "ROUTING-2026-08-04-s10.3-seam-carries-the-reason-browser-rust-stake"
+    ok("a citation regex reaches a stem with an internal dot",
+       inbound.CITATION.findall("`%s`" % dotted) == [dotted],
+       inbound.CITATION.findall(dotted))
+    ok("...and the leading-clause test then credits it",
+       inbound.cites(dotted, [dotted]) == dotted)
+
+    # The mirror: the trailing character must stay alphanumeric, or a citation
+    # ending a sentence swallows the full stop into the identifier and stops
+    # matching the file.
+    ok("a citation ending a sentence does not swallow the full stop",
+       inbound.CITATION.findall("see ROUTING-2026-09-06-b-arch-thing.")
+       == ["ROUTING-2026-09-06-b-arch-thing"])
+    ok("the -b / -bb distinction still holds",
+       inbound.CITATION.findall("ROUTING-2026-09-06-b and ROUTING-2026-09-06-bb")
+       == ["ROUTING-2026-09-06-b", "ROUTING-2026-09-06-bb"])
+    # The mirror of the dot fix, introduced BY the dot fix: allowing internal
+    # dots made `.md` a legal continuation, so a ledger citing the FILENAME
+    # produced `...-federation.md`, which reaches no packet. Caught on the same
+    # live run that the dot fix was written for.
+    ok("a ledger citing the FILENAME still credits the packet",
+       inbound.ledger_citations("see `ROUTING-2026-09-09-a-arch-the-offer.md`")
+       == ["ROUTING-2026-09-09-a-arch-the-offer"],
+       inbound.ledger_citations("see `ROUTING-2026-09-09-a-arch-the-offer.md`"))
+
+    ok("a bare leading clause still does not credit a longer sibling",
+       inbound.cites("ROUTING-2026-09-06-bb-x", ["ROUTING-2026-09-06-b"]) is None)
+
     print()
     if FAILURES:
         print("%d FAILURE(S): %s" % (len(FAILURES), ", ".join(FAILURES)))

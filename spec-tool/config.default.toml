@@ -619,3 +619,39 @@ path = "entity-workbench-go"
 source = ["*.go"]
 skip = ["/vendor/", "/.git/"]
 oracle_paths = ["tools/e2e/"]
+
+# ---------------------------------------------------------------------------
+# vocab — the application tier's TYPE VOCABULARY join.
+#
+# `seats` is DELIBERATELY not restated here: it falls back to
+# [analyzer.census.seats] so there is one config home for "where the trees
+# are". Two copies would drift, and the drift would be invisible — both
+# analyzers would go on reporting cleanly about different sets of trees.
+#
+# `app_seats` is the subset that implements L5 conventions. Add a seat here
+# the day it starts emitting `app/*` tags; a seat named but absent on disk is
+# reported as COULD-NOT-LOOK and named, never silently dropped.
+[analyzer.vocab]
+app_seats = ["entity-browser-rust", "entity-workbench-go"]
+
+[analyzer.roster]
+# A spec's version is declared once (the header, source of truth) and copied
+# into the living roadmaps and the tier standards' members tables. Neither end
+# says it is a copy, so the drift is invisible from both — `charter`'s defect,
+# one tier down. First run: 13 of 33 rows stale.
+rosters = [
+  "ROADMAP-EXTENSIONS.md",
+  "ROADMAP-SDK.md",
+  "ROADMAP-APPLICATIONS.md",
+  "guides/GUIDE-APPLICATION-DEVELOPMENT.md",
+]
+spec_dirs = ["specs"]
+
+[analyzer.roster.rules]
+# The roster disagrees with the header. The header wins; fix the roster. Never
+# the other way round — a roster row is not evidence about a spec.
+roster-version-drift = "error"
+# The row names a stem that resolves to no file. After a rename a pattern gate
+# silently stops matching and every count stays green, which is why this is its
+# own rule rather than a skip.
+roster-unknown-spec = "error"

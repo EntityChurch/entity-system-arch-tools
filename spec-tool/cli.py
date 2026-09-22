@@ -17,6 +17,7 @@ that reads the one shared model (`model.py`) and the one config
     spec corpus [--root …|--vendor …|--json]               test-vector artifact gate
     spec convergence [--window N|--json]                   spec rate-of-change + pipeline
     spec charter [--charter …|--agents …|--json]           the discipline set, both homes
+    spec roster [--gate|--owed|--json]                     roadmap version columns vs spec headers
     spec expiry  [--gate|--owed|--json]                    tracker rows whose EVIDENCE died
     spec ledger [--root …|--json]                          declared counts vs the directories
     spec register [--gate|--owed|--json]                   design docs findable by the QUESTION
@@ -24,6 +25,7 @@ that reads the one shared model (`model.py`) and the one config
     spec inventory [--gate|--owed|--update-baseline]        conformance rows: addressable, or only quotable
     spec declare [--gate|--owed|--update-baseline]          the §3.3 dependency contract, all seven fields
     spec census [--doc …|--drift|--gaps|--json]            normative surface vs the cohort's own citations
+    spec vocab  [--prefix …|--owed|--gate|--json]          app-tier TYPE VOCABULARY: does the field converge?
     spec sdksync [--root …|--json|--unpinned|--update]      SDK restatements vs their sources
     spec provenance [--since REF|--proposal-root R|--json] L1: normative spec edit needs a proposal
     spec check                                             run all three gates (style + standards + coherence)
@@ -68,7 +70,9 @@ import convergence
 import corpus
 import coverage
 import census
+import vocab
 import charter
+import roster
 import expiry
 import ledger
 import inbound
@@ -99,7 +103,9 @@ DELEGATES = {
     "convergence": convergence.main,
     "coverage": coverage.main,
     "census": census.main,
+    "vocab": vocab.main,
     "charter": charter.main,
+    "roster": roster.main,
     "expiry": expiry.main,
     "ledger": ledger.main,
     "inbound": inbound.main,

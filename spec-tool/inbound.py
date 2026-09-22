@@ -200,7 +200,18 @@ def stem_of(name: str) -> str:
 # truth was 2) and `ledger` once. A matcher calibrated on the name the
 # rule-writer expects is not a census of the corpus's vocabulary. It is written
 # down here because three tools in this toolkit have now made it.
-CITATION = re.compile(r"ROUTING-\d{4}-\d{2}-\d{2}(?:-[A-Za-z0-9]+)*")
+# A segment MAY contain an internal `.` or `_`, because real packet filenames do:
+# `ROUTING-2026-08-04-s10.3-seam-...` names a spec section in its slug. With
+# `[A-Za-z0-9]+` alone the match stopped at `...-08-04-s10`, the leading-clause
+# test then failed on `.3-seam`, and **that packet was uncitable by any
+# spelling** — it reported `owed` however correctly the ledger named it. Fifth
+# matcher in this toolkit calibrated against the spelling the rule-writer
+# expected rather than the corpus's actual vocabulary.
+#
+# The trailing character must stay alphanumeric so a citation ending a sentence
+# does not swallow the full stop into the identifier.
+CITATION = re.compile(
+    r"ROUTING-\d{4}-\d{2}-\d{2}(?:-[A-Za-z0-9]+(?:[._][A-Za-z0-9]+)*)*")
 
 # The shortest citation that may credit anything. A bare `ROUTING-<date>` names
 # a day, not a document, and on a busy day that is up to nine packets — so a
@@ -210,7 +221,13 @@ MIN_CITE_PARTS = 5  # ROUTING + Y + M + D + at least one discriminator
 
 def ledger_citations(text: str) -> List[str]:
     """Every packet citation the ledger makes, longest first."""
-    seen = {t for t in CITATION.findall(text)
+    # A ledger may cite the FILENAME rather than the stem. Allowing internal
+    # dots (so `...-s10.3-seam-...` matches at all) means `.md` is now a legal
+    # continuation, and `...-federation.md` reaches no packet — the mirror of
+    # the defect the dot support was added for, introduced by the same edit and
+    # caught by the same run. Strip a known document extension after matching.
+    seen = {t[:-3] if t.endswith(".md") else t
+            for t in CITATION.findall(text)
             if len(t.split("-")) >= MIN_CITE_PARTS}
     return sorted(seen, key=len, reverse=True)
 

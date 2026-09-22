@@ -201,6 +201,50 @@ with tempfile.TemporaryDirectory() as tmp:
         ok("the finding is reported against the proposal, not the index",
            found and found[0][1].rule == "proposal-state-mismatch")
 
+    # proposal-moot-in-active — the FOURTH disposition, and the fourth time a
+    # marker list in this toolkit was calibrated against the rule-writer's
+    # vocabulary instead of the corpus's. Found by a peer reading the tree, not
+    # by this gate: `SUPERSEDED BY EVENTS` sat in `active/` while this module
+    # reported a clean 0, and that 0 was quoted as "gates green" in a commit.
+    print("proposal-moot-in-active")
+
+    def state(status, name="PROPOSAL-X.md"):
+        return ledger.state_finding("# T\n\n**Status:** %s\n" % status, Path(name))
+
+    ok("the exact spelling that escaped — SUPERSEDED BY EVENTS",
+       state("SUPERSEDED BY EVENTS (2026-09-08)") is not None)
+    ok("...and it names the moot rule, not the landed-edit one",
+       state("SUPERSEDED BY EVENTS (2026-09-08)").rule == "proposal-moot-in-active")
+    ok("WITHDRAWN is moot too", state("WITHDRAWN (2026-08-02)") is not None)
+    ok("RETRACTED is moot too", state("RETRACTED — the premise was false") is not None)
+
+    # The moot test must NOT sit behind FOLD_MARKERS: a superseded proposal
+    # declares no fold, so routing it through the landed-edit path would silence
+    # it exactly as before. This is the regression that matters.
+    ok("moot fires with NO fold marker present at all",
+       state("SUPERSEDED — nothing landed and nothing will").rule
+       == "proposal-moot-in-active")
+
+    # ...and a hold cannot excuse it. "stays active" claims work is still owed;
+    # a moot proposal owes none, so the hold escape hatch must not apply.
+    ok("a hold marker does not excuse a moot status",
+       state("SUPERSEDED BY EVENTS — stays active for now") is not None)
+
+    # The other direction, which is where a too-eager matcher does its damage:
+    # an open proposal that merely MENTIONS superseding something else.
+    ok("a DRAFT that supersedes ANOTHER document is not itself moot",
+       state("DRAFT (2026-09-09) — supersedes PROPOSAL-Y") is None)
+    # The regression the first cut of this rule actually caused: the thing
+    # withdrawn is a PIN, not the proposal, and the proposal is reopened —
+    # a hold. A bare substring test took it out of `active/`.
+    ok("`the pin is withdrawn` in a REOPENED proposal is a hold, not moot",
+       state("DRAFT — folded, then reopened; the pin is withdrawn") is None)
+    ok("a moot word in the explanation, not the declaration, does not fire",
+       state("DRAFT (2026-09-09) — the earlier approach is obsolete") is None)
+    ok("an ordinary open DRAFT is untouched", state("DRAFT (2026-09-09)") is None)
+    ok("a folded proposal still raises the ORIGINAL rule, not the new one",
+       state("FOLDED 2026-09-08 as v1.8").rule == "proposal-state-mismatch")
+
     # proposal-undated-status — the cheap rung under the rule above, and the
     # reason it exists: five folded REGISTRY proposals sat in `active/` while
     # the state gate reported zero, because every one read exactly

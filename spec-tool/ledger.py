@@ -271,6 +271,54 @@ FOLD_MARKERS = ("folded", "fold landed", "after the fold", "post-fold",
 HOLD_MARKERS = ("partial", "stays active", "stays in `active/`", "stays in active/",
                 "until the cohort", "not yet folded", "unfolded", "reopened")
 
+# A FOURTH disposition, and neither list above can express it: the proposal is
+# MOOT. Not folded (no edit landed), not held (no work is owed), not draft. The
+# rule this proposal was written around went away — superseded, withdrawn,
+# overtaken — so it does not belong in `active/` either, and for the opposite
+# reason a folded one does not.
+#
+# **Found by `entity-core-go` reading the corpus, not by this gate**, on
+# 2026-09-09: `PROPOSAL-SYSTEM-NAMESPACE-RESERVATION-DEPENDENTS` declares
+# `**Status:** SUPERSEDED BY EVENTS (2026-09-08)` and sat in `active/` with this
+# module reporting a clean 0 — quoted as "gates green" in an arch commit message
+# the same day. A gate's clean run was cited as evidence for a claim the gate
+# could not evaluate.
+#
+# **This is the FOURTH instance of one calibration defect in this toolkit** —
+# after `register`'s "0 of 97 where the truth was 2", this module's own "6 where
+# a hand count found 9", and `inbound`'s "0 of 210". Every one of them: a marker
+# list written from the words the rule-writer expected, run against a corpus
+# whose authors wrote something else. The FOLD_MARKERS comment above states the
+# remedy in so many words and this list still missed a spelling sitting in the
+# tree it grades. **Calibrating once is not calibrating** — the corpus keeps
+# inventing dispositions, so the gate needs a category for "a status that
+# declares SOMETHING and matches nothing here", which is the next rung and is
+# recorded in the module docstring rather than built today.
+MOOT_MARKERS = ("superseded", "withdrawn", "obsolete", "moot", "retracted",
+                "overtaken by events", "abandoned")
+
+# Moot is matched against the status's LEADING CLAUSE only, and the first cut of
+# this rule proved why in its own test run. `**Status:** DRAFT — folded, then
+# reopened; the pin is withdrawn` is a HOLD: the thing withdrawn is a pin, not
+# the proposal. A bare substring test fired moot on it and took a correctly-open
+# proposal out of `active/`.
+#
+# A `**Status:**` line declares its disposition FIRST and then explains — that
+# is the house form, in every proposal in the corpus. So the disposition word
+# has to be in the declaration, not in the explanation. Same leading-clause
+# discipline `register` and `inbound` use for citations, applied to a state.
+#
+# The lesson is that adding a marker list is where this defect lives, in both
+# directions at once: too narrow and it misses a spelling (the bug this rule was
+# written for), too broad and it swallows a sentence that merely mentions the
+# word (the bug writing it introduced). Only a both-direction test catches both.
+_LEAD_RE = re.compile(r"^[^—–;,()]+")
+
+
+def _leading_clause(status: str) -> str:
+    m = _LEAD_RE.match(status.strip())
+    return (m.group(0) if m else status).strip().lower()
+
 
 # A NEGATED fold marker is not a fold marker, and a substring test cannot tell
 # them apart. `**Status:** DRAFT — not ratified, not folded.` contains both
@@ -328,17 +376,30 @@ def state_finding(text: str, path: Path) -> Optional[Finding]:
     if status is None:
         return None
     low = _strip_negated(status.lower())
+    line = text[:text.index(status)].count("\n") + 1
+    short = status[:110] + ("…" if len(status) > 110 else "")
+
+    # Moot is checked FIRST and is not gated behind FOLD_MARKERS: a superseded
+    # proposal declares no fold, so the landed-edit test never reaches it. A
+    # hold cannot excuse it either — "stays active" is a claim about work that
+    # is still owed, and a moot proposal owes none.
+    if any(m in _leading_clause(status) for m in MOOT_MARKERS):
+        return Finding(
+            "proposal-moot-in-active", line,
+            "sits in `active/` (work owed); its own status declares the "
+            "proposal MOOT: \"%s\" — nothing is owed, so the directory is "
+            "wrong. Move it to `superseded/` (or `implemented/` if an edit did "
+            "land), and say in one line what overtook it" % short)
+
     if not any(m in low for m in FOLD_MARKERS):
         return None
     if any(m in low for m in HOLD_MARKERS):
         return None
-    line = text[:text.index(status)].count("\n") + 1
     return Finding(
         "proposal-state-mismatch", line,
         "sits in `active/` (work owed); its own status declares the edit "
         "landed: \"%s\" — state is the directory. Verify every delta row "
-        "against the specs, then move it or declare the hold"
-        % (status[:110] + ("…" if len(status) > 110 else "")))
+        "against the specs, then move it or declare the hold" % short)
 
 
 # An ISO date anywhere in the status line. `(2026-08-21)`, `— 2026-07-13.`,
