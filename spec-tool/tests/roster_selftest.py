@@ -71,6 +71,26 @@ ok("the FIRST maturity-anchored version wins, not a later mention",
    rows("| `APP-CONVENTION-SHARE` | r | Draft v0.2 — supersedes v0.1 entirely |")
    == [(1, "APP-CONVENTION-SHARE", "0.2")])
 
+# ------------------------------------------------- the tier-classification shape
+# `SYSTEM-ARCHITECTURE` §13.1 puts the maturity word and the version together in
+# cell 2, where the members-table shape expects them in cell 3. Added 2026-09-14
+# with the document; without the shape, adding the filename would have gated
+# nothing and reported clean.
+ok("a tier row with the maturity word in cell 2 is read",
+   rows("| `EXTENSION-TREE` | Draft v4.9 | snapshots / diffs / merges |")
+   == [(1, "EXTENSION-TREE", "4.9")])
+ok("a tier row with no leading v is read",
+   rows("| `EXTENSION-DISCOVERY` | Active 1.2 | peer discovery |")
+   == [(1, "EXTENSION-DISCOVERY", "1.2")])
+ok("the REVERSE ordering is read too — it was live and the first cut missed it",
+   rows("| `EXTENSION-DURABILITY` | v0.1 Exploratory | retracted from spec |")
+   == [(1, "EXTENSION-DURABILITY", "0.1")])
+ok("a later version in the SAME tier row's prose does not win",
+   rows("| `EXTENSION-ROLE` | Draft v2.3 | supersedes the v1.0 surface |")
+   == [(1, "EXTENSION-ROLE", "2.3")])
+ok("the tier shape reports the version once, never twice",
+   len(rows("| `EXTENSION-TREE` | Draft v4.9 | Active v1.0 mentioned later |")) == 1)
+
 # ------------------------------------------------- DELIBERATE SILENCE
 # Each of these is correct text on the live corpus. A finding here is a false
 # accusation, which is the expensive direction.
@@ -88,6 +108,12 @@ ok("a lowercase name is NOT a roster row",
    rules("| `entity-core-go` | 1.2 | a repo, not a spec |") == [])
 ok("a table row with no version at all is silent",
    rules("| `EXTENSION-TREE` | the tree extension | Stable |") == [])
+# The tier shape must not eat the 59 narrative spec-plus-version mentions that
+# motivated keeping it separate from ROW_STATUS_RE rather than loosening it.
+ok("a maturity word in a LATE cell is not a tier row",
+   rules("| `EXTENSION-TREE` | the tree extension | it went Stable at v4.0 |") == [])
+ok("a tier row for a non-spec name is silent",
+   rules("| Wave 1 | Draft v1.0 | a release wave, not a spec |") == [])
 
 # ------------------------------------------------- BOTH DIRECTIONS, end to end
 def corpus(spec_version, roster_version, spec_name="EXTENSION-TREE"):

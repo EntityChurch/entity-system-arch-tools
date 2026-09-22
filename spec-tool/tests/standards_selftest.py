@@ -509,6 +509,16 @@ p_case("discipline_letter_is_caught",
        _pub("This is L23 on the document axis.", "discipline-letter-ref"))
 p_case("discipline_letter_possessive_is_caught",
        _pub("L8's fifteenth form applies here.", "discipline-letter-ref"))
+# BOTH DIRECTIONS for the URL carve-out (2026-09-13). The measured instance was
+# a Princeton lecture PDF named `L8-dhts.pdf` cited in a published landscape
+# exploration. Stripping URLs must not make the rule blind to a real leak that
+# happens to share a line with a link — which is why the second case exists.
+p_case("discipline_letter_inside_a_url_is_not_a_leak",
+       not _pub("see [DHTs](https://cs.princeton.edu/courses/fall19/docs/L8-dhts.pdf)",
+                "discipline-letter-ref"))
+p_case("discipline_letter_beside_a_url_still_fires",
+       _pub("L23 applies here — see [notes](https://example.org/L8-dhts.pdf)",
+            "discipline-letter-ref"))
 
 # NEGATIVE CONTROLS. Each of these is legitimate published prose, and a rule
 # that fired on them would be re-baselined into irrelevance inside a release.

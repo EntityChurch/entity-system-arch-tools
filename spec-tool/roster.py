@@ -111,6 +111,22 @@ ROW_STATUS_RE = re.compile(
     re.I)
 
 
+# The tier-classification shape: `| `EXTENSION-TREE` | Draft v4.9 | role… |` —
+# the maturity word and the version share cell 2, where ROW_STATUS_RE expects
+# them in cell 3. Kept as its own pattern rather than loosening ROW_STATUS_RE,
+# because the loose form ("a maturity word in ANY later cell") would read the
+# 59 narrative mentions of a spec-plus-version as roster rows. The maturity word
+# must open the cell and the version must close it.
+# Both orderings occur in one table: `Draft v4.9` and `v0.1 Exploratory`. The
+# second was live (the Tier 4 row) and unread by the first cut, which would have
+# been a silent hole rather than a wrong number — the worse direction.
+ROW_TIER_RE = re.compile(
+    r"^\|\s*`?([A-Z][A-Z0-9-]{3,})(?:\.md)?`?\s*\|\s*(?:"
+    r"(?:Draft|Stable|Final|Active|Candidate|Exploratory)\s+v?([0-9][0-9.]*)"
+    r"|v([0-9][0-9.]*)\s+(?:Draft|Stable|Final|Active|Candidate|Exploratory)"
+    r")[^|]*\|", re.I)
+
+
 class Finding:
     __slots__ = ("rule", "line", "text")
 
@@ -150,7 +166,14 @@ def roster_rows(text: str) -> List[Tuple[int, str, str]]:
     """
     rows: List[Tuple[int, str, str]] = []
     for i, line in enumerate(text.splitlines(), 1):
-        m = ROW_VERSION_RE.match(line) or ROW_STATUS_RE.match(line)
+        m = ROW_VERSION_RE.match(line)
+        if m is None:
+            m = ROW_TIER_RE.match(line)
+            if m is not None:
+                # two alternatives, one version group each
+                rows.append((i, m.group(1), m.group(2) or m.group(3)))
+                continue
+            m = ROW_STATUS_RE.match(line)
         if m:
             rows.append((i, m.group(1), m.group(2)))
     return rows

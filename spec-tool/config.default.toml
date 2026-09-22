@@ -639,11 +639,22 @@ app_seats = ["entity-browser-rust", "entity-workbench-go"]
 # into the living roadmaps and the tier standards' members tables. Neither end
 # says it is a copy, so the drift is invisible from both — `charter`'s defect,
 # one tier down. First run: 13 of 33 rows stale.
+#
+# `SYSTEM-ARCHITECTURE.md` added 2026-09-14 and it is a THIRD roster shape: the
+# tier classification puts the maturity word and the version together in cell 2
+# (`| `EXTENSION-TREE` | Draft v4.9 | …`) where the members-table shape expects
+# them in cell 3. Adding the filename alone would have gated NOTHING and
+# reported clean — which is why the shape went with it. Measured before the
+# fix: 13 of 22 rows stale by up to eleven minor revisions, four extensions
+# absent from the document entirely while three of the four cite it by number
+# as the authority for their own tier, and one landed extension described as an
+# early sketch. It was the only version roster in the corpus no gate read.
 rosters = [
   "ROADMAP-EXTENSIONS.md",
   "ROADMAP-SDK.md",
   "ROADMAP-APPLICATIONS.md",
   "guides/GUIDE-APPLICATION-DEVELOPMENT.md",
+  "specs/SYSTEM-ARCHITECTURE.md",
 ]
 spec_dirs = ["specs"]
 

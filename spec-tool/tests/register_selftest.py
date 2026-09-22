@@ -98,6 +98,53 @@ with tempfile.TemporaryDirectory() as td:
                              "cites `P2P-COVERAGE-AUDIT`",
                              ["P2P-COVERAGE-AUDIT"]))
 
+    # The stripping was ONE-SIDED (2026-09-13): stem_of removes the class prefix
+    # from the FILENAME, so a register that keeps the prefix AND truncates
+    # matched on neither side. Measured: one document, cited eight times,
+    # reported owed. The full-length form always worked -- it contains the
+    # stripped stem as a substring -- so this only ever fired on
+    # prefix-plus-truncation, which is why it survived until a long name was
+    # cited short.
+    print("\na register citation that keeps its class prefix and truncates")
+    root = build(
+        tmp / "a2b",
+        "# REGISTER\n\n| **X-1** | q | a | synthesis "
+        "`SYNTHESIS-THE-FIVE-LOOKUPS-REDUCE-TO-ONE-LOOP` | MEASURED |\n",
+        {
+            "docs/research/explorations/"
+            "SYNTHESIS-THE-FIVE-LOOKUPS-REDUCE-TO-ONE-LOOP"
+            "-AND-THE-SET-YOU-SERVE.md": "# x\n",
+            # the negative control that matters: stripping a prefix off a token
+            # must not start crediting unrelated documents of the same class
+            "docs/research/explorations/"
+            "SYNTHESIS-A-COMPLETELY-DIFFERENT-SUBJECT.md": "# y\n",
+        })
+    code, res = register.scan(root)
+    ok("a prefixed, truncated citation discharges the document",
+       res["cited"] == 1, "res=%r" % res)
+    ok("...and it does not credit an unrelated document of the same class",
+       len(res["owed"]) == 1
+       and res["owed"][0]["file"].endswith("DIFFERENT-SUBJECT.md"),
+       "owed=%r" % res["owed"])
+
+    # Fifth instance of the stale-class-list defect (2026-09-13): the corpus
+    # minted WALKTHROUGH, the register cited it in house style (tail only), and
+    # a document that WAS cited reported owed. The assertion is here so the next
+    # class minted is added with a test rather than after a false owed.
+    print("\na newly-minted class prefix is stripped like the others")
+    root = build(
+        tmp / "a3b",
+        "# REGISTER\n\n| **X-1** | q | a | walkthrough "
+        "`I-HAVE-A-MANIFEST-AND-FIVE-HUNDRED-CHUNK-HASHES` | DERIVED |\n",
+        {
+            "docs/research/explorations/"
+            "WALKTHROUGH-I-HAVE-A-MANIFEST-AND-FIVE-HUNDRED-CHUNK-HASHES"
+            "-HOW-DO-I-FIND-THEM.md": "# x\n",
+        })
+    code, res = register.scan(root)
+    ok("a WALKTHROUGH-class document is discharged by a tail citation",
+       res["cited"] == 1 and not res["owed"], "res=%r" % res)
+
     print("\na date prefix and an absorption class prefix are noise too")
     root = build(
         tmp / "a3",

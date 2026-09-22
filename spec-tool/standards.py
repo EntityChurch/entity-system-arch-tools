@@ -298,6 +298,27 @@ INTERNAL_PATH_RE = re.compile(
 # the gate. L1–L5 as discipline references are therefore missed on purpose, and
 # that is a stated limit rather than an oversight.
 DISCIPLINE_LETTER_RE = re.compile(r"\bL(?:[6-9]|1\d|2\d)\b")
+
+# A URL is not prose, and a path segment inside one is not a citation of
+# anything of ours. Measured instance (2026-09-13): a landscape exploration
+# citing a Princeton lecture PDF named `L8-dhts.pdf` was reported as leaking
+# discipline letter **L8** into a published document. The rule was right about
+# the token and wrong about the context — the same shape as the `proposals/`
+# entity-path defect recorded below.
+#
+# Stripping runs before the discipline-letter check ONLY, because that is where
+# the measured instance is. The adjacent case is real and is deliberately not
+# pre-empted: `internal-path-ref` would fire the same way on an external URL
+# containing `docs/proposals/` or `docs/status/`. If that shows up, widen this
+# the same way rather than baselining it.
+URL_RE = re.compile(r"<?https?://[^\s)>\]]+>?")
+
+
+def strip_urls(ln: str) -> str:
+    """Blank out URLs so a rule keyed on prose cannot fire on a link target."""
+    return URL_RE.sub(" ", ln)
+
+
 # A citation of a proposal DOCUMENT. The second alternative used to be a bare
 # `\bproposals/`, meant to catch a path-style citation like `docs/proposals/...`
 # -- and it fired on `system/identity/internal/proposals/{kind}-{id}`, which is
@@ -999,7 +1020,7 @@ def analyze(path: Path, text: str) -> List[Finding]:
             findings.append(Finding("operator-quote", ln1, ln.strip()[:90]))
         if INTERNAL_PATH_RE.search(ln):
             findings.append(Finding("internal-path-ref", ln1, ln.strip()[:90]))
-        if DISCIPLINE_LETTER_RE.search(ln):
+        if DISCIPLINE_LETTER_RE.search(strip_urls(ln)):
             findings.append(Finding("discipline-letter-ref", ln1, ln.strip()[:90]))
 
     # --- hash width pins (SPECIFICATION-FORMAT.md 8.4.5) ---

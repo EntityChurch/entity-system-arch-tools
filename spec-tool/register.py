@@ -91,9 +91,19 @@ SKIP_FILES = {"INDEX.md", "README.md"}
 # A class prefix carries no information about the question a document answers,
 # so the register cites the tail. Stripping them is what makes stem matching
 # work at all.
+#
+# THIS LIST GOES STALE BY CONSTRUCTION and has now done so five times: the
+# corpus mints a new document class, the register cites it in house style
+# (tail only), and the gate reports a document that IS cited as owed. ABSORPTION
+# cost 13 false owed before it was noticed; WALKTHROUGH cost one, caught the day
+# the class was minted (2026-09-13).
+#
+# The failure is quiet in the expensive direction -- a FALSE OWED reads as
+# "nobody has looked at this", so the honest response to an owed document whose
+# row you can see is to check HERE before writing the row again.
 CLASS_PREFIX = re.compile(
     r"^(PROPOSAL|EXPLORATION|ANALYSIS|REVIEW|REFERENCE|ARCH-RESPONSE"
-    r"|ARCH-RULINGS|ABSORPTION|PLAN|CRITIQUE|SYNTHESIS)-")
+    r"|ARCH-RULINGS|ABSORPTION|PLAN|CRITIQUE|SYNTHESIS|WALKTHROUGH)-")
 
 MARKER = re.compile(r"^\s*Design-Conclusions:\s*none\s*$", re.M | re.I)
 
@@ -151,8 +161,27 @@ def register_tokens(reg_text: str) -> List[str]:
     `EXPLORATION-THE-REDUCTION-MONOTONICITY-IS-THE-PATTERN`. Testing only
     `stem in register` misses every truncated citation, and a first hand-run of
     exactly that comparison reported "0 of 97 cited" where the truth was 2.
+
+    Tokens are ALSO recorded with the class prefix stripped, because the
+    stripping was one-sided: `stem_of` removes `SYNTHESIS-`/`EXPLORATION-` from
+    the FILENAME, so a register that cites the prefix **and truncates** — e.g.
+    `SYNTHESIS-THE-FIVE-LOOKUPS-REDUCE-TO-ONE-LOOP` for a file two clauses
+    longer — matched on neither side and was reported owed. The full-length
+    form already worked (it contains the stripped stem as a substring), so this
+    only ever fired on prefix-plus-truncation. Measured on this corpus 2026-09-13:
+    one document, cited eight times, reported owed.
+
+    Stripping here is safe in the direction that matters: `is_cited` still
+    requires the stem to START WITH a token, so a shorter token cannot credit an
+    unrelated document — only one whose stem it genuinely prefixes.
     """
-    seen = {t for t in REG_TOKEN.findall(reg_text) if len(t) >= MIN_STEM}
+    seen = set()
+    for t in REG_TOKEN.findall(reg_text):
+        if len(t) >= MIN_STEM:
+            seen.add(t)
+        bare = CLASS_PREFIX.sub("", t)
+        if bare != t and len(bare) >= MIN_STEM:
+            seen.add(bare)
     return sorted(seen, key=len, reverse=True)
 
 
