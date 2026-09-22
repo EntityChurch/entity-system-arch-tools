@@ -95,6 +95,9 @@ default = "canonical-spec"
 "PRIMER-*.md"              = "arch-doc"
 "SYSTEM-ARCHITECTURE.md"   = "arch-doc"
 "SYSTEM-IDENTITY-COMPOSITION.md" = "arch-doc"
+# RETIRED 2026-09-08 and moved to `docs/archive/` — a condensed restatement is the class
+# SPECIFICATION-FORMAT §8.4.3 forbids authoring. The row is kept, not deleted: if the archived
+# copy is ever in scope it must still class as arch-doc and never as a canonical spec.
 "ENTITY-SYSTEM-REFERENCE.md" = "arch-doc"
 # A domain CHARTER declares what a domain is for and which workstream owns it —
 # process, not protocol. It defaulted to canonical-spec, which scored its own

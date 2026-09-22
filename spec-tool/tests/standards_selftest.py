@@ -16,6 +16,7 @@ this file is what keeps the rule honest.
 
 Stdlib-only. Third leg of tool verification, beside parity.sh + address_selftest.
 """
+import json
 import sys
 from pathlib import Path
 
@@ -180,6 +181,33 @@ rcase("citation_may_drop_a_cgid_stamp",
 #     replace the existing "not normative" signal.
 rcase("editorial_warn_still_fires_for_a_resolvable_name",
       CITE % "PROPOSAL-CONVERGENT-MIRRORING", "proposal-citation", 1)
+
+# (4a) An entity-tree path with a `proposals/` segment is NOT a citation, and
+#      this fired for real: the rule matched a bare `\bproposals/`, so
+#      EXTENSION-IDENTITY §5.1's `system/identity/internal/proposals/{kind}-{id}`
+#      — normative spec content naming a staging subtree — was reported as
+#      internal routing noise, and it gated. **A directory name is not a
+#      citation.** Both directions are pinned here: the entity path stays silent,
+#      the document path still fires.
+rcase("entity_tree_path_with_proposals_segment_is_not_a_citation",
+      "Draft attestations stage at `system/identity/internal/proposals/{kind}-{id}`.",
+      "proposal-citation", 0)
+rcase("a_proposals_segment_in_any_tree_path_is_silent",
+      "Bind under `system/vc/proposals/pending` and sweep on commit.",
+      "proposal-citation", 0)
+rcase("docs_proposals_path_still_fires",
+      "See `docs/proposals/active/extensions/whatever.md` for the derivation.",
+      "proposal-citation", 1)
+rcase("proposals_state_dir_path_still_fires",
+      "Recorded in `proposals/implemented/core/the-thing.md`.",
+      "proposal-citation", 1)
+# The first fix for this was too tight and the parity golden caught it: a
+# lowercase filename under a bare `proposals/` is a real citation and stopped
+# firing. **A document reference ends in `.md`; an entity path does not** — that
+# is the discriminator, not the capitalisation of the stem.
+rcase("lowercase_proposal_filename_still_fires",
+      "It graduated from `proposals/example-widget.md`, a process-routing citation.",
+      "proposal-citation", 1)
 
 # (5) `[PROPOSAL-FIRST]` is the lifecycle tag, not a filename. Reporting the
 #     corpus's own process vocabulary as a missing document is an error nobody
@@ -492,6 +520,24 @@ p_case("L5_is_not_a_discipline_letter",
                 "discipline-letter-ref"))
 p_case("the_word_operators_is_not_an_operator_quote",
        not _pub("Comparison operators evaluate left to right.", "operator-quote"))
+# "operator" is ALSO this corpus's word for the deployment role — 465 occurrences
+# across specs/ and guides/. The compound adjectives are certain noise and are
+# exempt; everything ambiguous still fires, because for a LEAK rule a false
+# positive costs one baseline line and a miss is published to a stranger.
+for _noise in ("Bounds are operator-configurable; defaults conservative.",
+               "a narrower path with operator-class authority",
+               "consult specific operator-authored sources without signatures",
+               "surfaced to the peer operator via an observable mechanism",
+               "an operator-supplied handle — a URL query, a QR code"):
+    p_case("deployment_sense_%s" % _noise.split()[-1].strip(".,—"),
+           not _pub(_noise, "operator-quote"))
+# ...and the ambiguous forms deliberately still fire. Each of these is a real
+# leak that a tightened, attribution-only pattern dropped when it was measured.
+for _leak in ("From an operator question about store-and-forward under churn",
+              "Direction: confirmed by the operator (2026-07-20)",
+              "Authored in the arch workspace at the operator's request",
+              "the payoff the operator named in the bridge doc"):
+    p_case("still_fires_%s" % _leak.split()[1], _pub(_leak, "operator-quote"))
 p_case("an_ordinary_spec_path_is_not_an_internal_path",
        not _pub("defined in `specs/extensions/EXTENSION-TREE.md` §3.3a",
                 "internal-path-ref"))
@@ -506,6 +552,42 @@ for _r in ("operator-quote", "internal-path-ref", "discipline-letter-ref"):
            not [f for f in standards.analyze(
                Path("EXTENSION-GADGET.md"),
                "the operator said L23 in `AGENTS.md`\n") if f.rule == _r])
+
+# (15) A BASELINE FILE DESCRIBES THE RULES IT CAN ACTUALLY HOLD. `meta.rules`
+#      was written from `BASELINE_RULES`, the eligibility UNION — correct for the
+#      gating logic, wrong for the file: the default scope filters the three
+#      published-only rules out before scoring (the block above pins that), so
+#      the default baseline claimed accepted debt for rules it can never carry,
+#      directly beneath a note reading "NORMATIVE specs only". Caught by running
+#      the documented ratchet, which rewrote the field as a side effect.
+print("  -- meta.rules describes the scope that wrote the file --")
+
+
+def _meta_rules(published):
+    """`meta.rules` as written under a given scope."""
+    prev = standards.PUBLISHED_SURFACE_SCOPE
+    standards.PUBLISHED_SURFACE_SCOPE = published
+    try:
+        return set(json.loads(
+            standards.Baseline({}, {}, {}).to_json())["meta"]["rules"])
+    finally:
+        standards.PUBLISHED_SURFACE_SCOPE = prev
+
+
+_only_pub = set(standards.PUBLISHED_LEAK_RULES) - set(standards.NARRATIVE_RULES)
+p_case("default_scope_meta_omits_the_published_only_rules",
+       not (_meta_rules(False) & _only_pub))
+p_case("default_scope_meta_keeps_every_narrative_rule",
+       set(standards.NARRATIVE_RULES) <= _meta_rules(False))
+# The other direction, so the fix cannot degrade into "drop them everywhere":
+# in a published scope all eight ARE eligible and all eight must be listed.
+p_case("published_scope_meta_lists_the_full_union",
+       _meta_rules(True) == set(standards.BASELINE_RULES))
+# And the gating set itself is untouched — narrowing it would silently stop
+# holding real debt, which is the failure this whole mechanism exists to refuse.
+p_case("gating_eligibility_set_is_still_the_union",
+       set(standards.BASELINE_RULES)
+       == set(standards.NARRATIVE_RULES) | set(standards.PUBLISHED_LEAK_RULES))
 
 if FAILURES:
     print(f"\n{len(FAILURES)} failure(s):")

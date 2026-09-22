@@ -66,7 +66,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 import config as _config  # sibling in tools/spec/
@@ -181,8 +181,60 @@ DATE_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 # An operator conversation, however it is framed. `[operator, 2026-08-21`,
 # "operator-directed", "per the operator", "the operator's own read".
+#
+# **"Operator" is ALSO ordinary published vocabulary in this corpus, and that is
+# why this pattern is a construction and not a word.** A deployment operator
+# runs a peer: the specs and guides say `operator-configurable`,
+# `operator-class authority`, `operator-authored sources`, `operator GC`,
+# "surfaced to the peer operator" — 465 occurrences across `specs/` and
+# `guides/`, essentially all of them the deployment sense. A bare `\boperator\b`
+# fires on every one.
+#
+# It read as working only because the scope it runs in holds a four-figure
+# baseline, so nobody looks at an individual finding. **A rule that is right by
+# accident on the documents anyone reads is not right** — and the direction it
+# fails in is the expensive one for a gate people are asked to trust: noise
+# teaches them to skip it, and the real leak is then in the pile they skipped.
+#
+# **The tightening that was attempted and rejected, because the measurement said
+# so.** The obvious fix is to match an ATTRIBUTED construction — `[operator`,
+# "per the operator", "the operator's own read" — and never the bare noun. Run
+# against the 169 documents in scope, that pattern dropped 446 of 584 findings,
+# and a hand audit of twelve drops found **ten were real leaks**: "the operator
+# ask for an entity-chat example", "Direction: confirmed by the operator",
+# "at the operator's request", "the payoff the operator named". Two were domain.
+# A second, wider attempt still missed a verbatim quoted conversation.
+#
+# **In these two directories "the operator" usually IS the principal, and no
+# regex separates that from "the operator sets a per-type strategy".** So the
+# rule stays broad and exempts only what is CERTAIN noise: the compound
+# adjectives and the plural, which no attribution ever wears. Everything
+# ambiguous still fires.
+#
+# **That is the right direction for a LEAK rule specifically**, and it is the
+# opposite of the calibration a coverage rule wants: a false positive costs one
+# baseline line, and a miss is published to a stranger. Where a document means
+# the deployment role, say so — "a deployment", "a peer operator" — which is
+# clearer for that reader anyway.
+OPERATOR_DOMAIN_RE = re.compile(
+    r"\boperator[- ](?:configurable|class|authored|controlled|defined|supplied"
+    r"|provided|facing|visible|observable|run|managed|owned|selected|specified"
+    r"|initiated|interface|controller|node)\b"
+    r"|\bpeer operator\b|\boperators\b|\bhandler/operator\b",
+    re.IGNORECASE)
+
 OPERATOR_RE = re.compile(
     r"\boperator(?:-directed|-raised|-correction|'s)?\b|\[operator\b", re.IGNORECASE)
+
+
+def operator_quote(line: str) -> bool:
+    """True when a line references the project operator, noise excluded.
+
+    Blank the certain-domain compounds first, then apply the broad pattern to
+    what is left. Substitution rather than a negative lookahead because the two
+    senses appear in the same line often enough to matter.
+    """
+    return bool(OPERATOR_RE.search(OPERATOR_DOMAIN_RE.sub(" ", line)))
 
 # An internal path or an agent-guidance file. A reader who clones the public
 # repo has none of these, so a reference to one resolves to nothing — which is
@@ -207,7 +259,24 @@ INTERNAL_PATH_RE = re.compile(
 # the gate. L1–L5 as discipline references are therefore missed on purpose, and
 # that is a stated limit rather than an oversight.
 DISCIPLINE_LETTER_RE = re.compile(r"\bL(?:[6-9]|1\d|2\d)\b")
-PROPOSAL_RE = re.compile(r"\bPROPOSAL-[A-Z0-9]|\bproposals/")
+# A citation of a proposal DOCUMENT. The second alternative used to be a bare
+# `\bproposals/`, meant to catch a path-style citation like `docs/proposals/...`
+# -- and it fired on `system/identity/internal/proposals/{kind}-{id}`, which is
+# an ENTITY TREE PATH and legitimate normative spec content (EXTENSION-IDENTITY
+# §5.1). A directory name is not a citation. The segment now has to be anchored
+# to the document tree (`docs/proposals/`) or be followed by something
+# document-shaped.
+#
+# The general form, and it is the same one that has bitten three analyzers in
+# this toolkit: **a rule keyed on a NOUN fires wherever the corpus uses that
+# noun for something else.** Calibrate against the corpus's actual vocabulary,
+# not against the spelling the rule-writer had in mind.
+PROPOSAL_RE = re.compile(
+    r"\bPROPOSAL-[A-Z0-9]"
+    r"|\bdocs/proposals/"                                   # the document tree, by name
+    r"|\bproposals/[^\s`)\]]*\.md\b"                        # a FILE under it
+    r"|\bproposals/(?:active|implemented|deferred|superseded)/"  # a state directory
+)
 AMENDMENT_RE = re.compile(r"\bAmendment\s+\d", re.IGNORECASE)
 VERSION_TOKEN_RE = re.compile(r"^\s*v?(\d+(?:\.\d+)*)\b")
 
@@ -356,6 +425,27 @@ BASELINE_FILENAME = ".spec-baseline.json"
 BASELINE_RULES = NARRATIVE_RULES | PUBLISHED_LEAK_RULES
 
 
+def eligible_rules() -> FrozenSet[str]:
+    """The baseline-eligible rules FOR THE ACTIVE SCOPE.
+
+    `BASELINE_RULES` above is the eligibility UNION across every scope, and that
+    is the right set for the gating logic to test membership against. It is not
+    what a baseline FILE covers: the default scope drops
+    `PUBLISHED_LEAK_RULES - NARRATIVE_RULES` outright before a finding is ever
+    scored, so writing the union into `.spec-baseline.json`'s `meta.rules`
+    states that the file accepts debt for three rules that can never appear in
+    it.
+
+    Small, and it is a description rather than a gate — but it is a file
+    claiming a coverage it does not have, sitting next to a `note` that says
+    "NORMATIVE specs only", which is the exact drift this baseline exists to
+    make visible. Keep the union for gating; write the scope's own set.
+    """
+    if PUBLISHED_SURFACE_SCOPE:
+        return BASELINE_RULES
+    return BASELINE_RULES - (PUBLISHED_LEAK_RULES - NARRATIVE_RULES)
+
+
 def baseline_filename(scope: str) -> str:
     """The baseline file for a scope. The default scope keeps the historical
     name so nothing existing moves; every other scope gets its own file."""
@@ -430,7 +520,7 @@ class Baseline:
                 debt.setdefault(f, {})[r] = n
         doc = {
             "meta": dict(self.meta, total=sum(self.counts.values()),
-                         files=len(debt), rules=sorted(BASELINE_RULES)),
+                         files=len(debt), rules=sorted(eligible_rules())),
             "categories": self.categories,
             "debt": debt,
         }
@@ -752,7 +842,7 @@ def analyze(path: Path, text: str) -> List[Finding]:
                 findings.append(Finding(rule, ln1, name))
         if AMENDMENT_RE.search(ln):
             findings.append(Finding("amendment-provenance", ln1, ln.strip()[:90]))
-        if OPERATOR_RE.search(ln):
+        if operator_quote(ln):
             findings.append(Finding("operator-quote", ln1, ln.strip()[:90]))
         if INTERNAL_PATH_RE.search(ln):
             findings.append(Finding("internal-path-ref", ln1, ln.strip()[:90]))
@@ -1074,7 +1164,7 @@ def run_baseline(roots: List[Path], path: Path, update: bool,
     print("  %d finding(s) across %d file(s), rules: %s"
           % (sum(seen.values()),
              len({f for f, _ in seen}),
-             ", ".join(sorted(BASELINE_RULES))))
+             ", ".join(sorted(eligible_rules()))))
     return 0
 
 

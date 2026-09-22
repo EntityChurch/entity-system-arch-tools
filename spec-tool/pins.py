@@ -146,22 +146,44 @@ def is_repo(d: Path) -> bool:
     return (d / ".git").exists()
 
 
-def looks_like_sha(tok: str) -> bool:
-    """A short-SHA candidate has both a digit and a hex letter, and is not a word.
+def never_a_sha(tok: str) -> bool:
+    """Shapes that are hex but are known not to be commits, at any length.
 
-    `20260716` is a seed; `deadbeef` is a joke; `1000000` is a number. Requiring
-    both classes removes the bulk of the noise without ever suppressing a real
-    hash, since a real one with no letter or no digit is ~1 in 10^8 and would
-    be reported by the resolver anyway if it existed.
-
-    A binary literal (`0b11100`) passes every one of those tests and is not a
-    commit, so it is excluded by shape. The suppression it costs is a short SHA
-    beginning `0b` with only 0s and 1s after — roughly 1 in 10^7, the same order
-    as the letter/digit rule above already accepts.
+    A named word (`deadbeef`), or a binary literal (`0b11100`) — every character
+    of which is a hex digit, so `TOKEN` matches it and the letter/digit test
+    below passes it. Found in a spec section deriving a sparse-bitmap position
+    from the first bits of a hash; `0b11100011` was reported as an unresolvable
+    commit. `0x` prefixes need no rule: `x` is not a hex digit, so `TOKEN` never
+    matches them.
     """
-    if tok in NOT_A_SHA:
-        return False
-    if BINARY_LITERAL.match(tok):
+    return tok in NOT_A_SHA or bool(BINARY_LITERAL.match(tok))
+
+
+def looks_like_sha(tok: str) -> bool:
+    """The NOISE FILTER for a token that resolves in no repository.
+
+    `20260716` is a seed; `1000000` is a number; neither is a commit anyone can
+    look up. Requiring both a digit and a hex letter removes the bulk of that
+    noise — **but it is a heuristic and it is applied last, never first.**
+
+    **A token that resolves to a commit in some repository IS a commit**, whatever
+    it is made of, so composition is not consulted for one. That ordering is the
+    fix for a real hole: this function's own docstring used to claim a real hash
+    with no letter or no digit is *"~1 in 10^8"*, which is the figure for a FULL
+    40-character SHA. **The corpus cites SHORT ones.** For a 7-character short
+    SHA the true rate is `(10/16)^7 + (6/16)^7` ≈ **3.8%, or about 1 in 26** —
+    so on a corpus with 686 short-SHA citations this filter was discarding on the
+    order of twenty-five of them *before* anything tried to resolve them, and
+    reporting the surface as measured.
+
+    **A citation the gate cannot see is not a clean citation**, and a filter
+    tuned on an estimate three orders of magnitude out is the same could-not-look
+    defect this toolkit has now found in four analyzers, arriving as arithmetic
+    instead of as scope. It surfaced as a flaky self-test: the fixtures build real
+    repositories, so roughly one run in twenty produced a short SHA this function
+    rejected, and the assertions that depend on it failed for no visible reason.
+    """
+    if never_a_sha(tok):
         return False
     return any(c.isdigit() for c in tok) and any(c in "abcdef" for c in tok)
 
@@ -248,7 +270,7 @@ def scan(root: Path, branch: str, siblings: List[Path]) -> Tuple[int, dict]:
                      "published surface contains" % (branch, root)}
 
     findings: List[dict] = []
-    scanned = considered = 0
+    scanned = considered = noise_dropped = 0
     verdict_cache: Dict[str, dict] = {}
 
     for rel in decl:
@@ -262,13 +284,28 @@ def scan(root: Path, branch: str, siblings: List[Path]) -> Tuple[int, dict]:
             continue
         for lineno, line in enumerate(text.splitlines(), 1):
             for tok in TOKEN.findall(line):
-                if not looks_like_sha(tok):
+                # Resolve FIRST, filter on composition only for what resolves
+                # nowhere. A token git can look up is a commit whatever it is
+                # made of; the letter/digit rule is noise suppression for the
+                # rest, and running it first silently dropped ~1 short SHA in 26.
+                if never_a_sha(tok):
                     continue
-                considered += 1
                 v = verdict_cache.get(tok)
                 if v is None:
                     home = next((r for r in repos if resolve_in(r, tok)), None)
                     if home is None:
+                        if not looks_like_sha(tok):
+                            # Resolves nowhere AND fails composition. Almost
+                            # always real noise (`20260716`, `1000000`) — but
+                            # for a token that resolves nowhere, composition is
+                            # the ONLY evidence there is, so ~1 real short SHA
+                            # in 26 citing an unconfigured repo lands here too.
+                            # That residue is unavoidable; making it SILENT is
+                            # not. Counted and reported, never just dropped.
+                            verdict_cache[tok] = {"rule": None, "home": None,
+                                                  "noise": True}
+                            noise_dropped += 1
+                            continue
                         v = {"rule": "pin-unresolvable", "home": None}
                     else:
                         ok = reachable_from(home, tok, branch)
@@ -276,6 +313,10 @@ def scan(root: Path, branch: str, siblings: List[Path]) -> Tuple[int, dict]:
                              "home": home.name} if ok is not None else \
                             {"rule": "pin-unreachable", "home": home.name}
                     verdict_cache[tok] = v
+                if v.get("noise"):
+                    noise_dropped += 1
+                    continue
+                considered += 1
                 if v["rule"]:
                     findings.append({"file": rel, "line": lineno, "sha": tok,
                                      "rule": v["rule"], "repo": v["home"]})
@@ -284,7 +325,8 @@ def scan(root: Path, branch: str, siblings: List[Path]) -> Tuple[int, dict]:
         "root": str(root), "branch": branch,
         "repos_searched": [r.name for r in repos],
         "docs_declared": len(decl), "docs_scanned": scanned,
-        "tokens_considered": considered, "findings": findings,
+        "tokens_considered": considered, "noise_dropped": noise_dropped,
+        "findings": findings,
     }
 
 
@@ -317,6 +359,12 @@ def report(res: dict, gate: bool) -> None:
           "— %d unreachable by a reader of `%s`."
           % (res["docs_declared"], res["docs_scanned"], res["tokens_considered"],
              len(f), res["branch"]))
+    nd = res.get("noise_dropped", 0)
+    if nd:
+        print("%d token(s) dropped as noise — resolve in no repo searched AND "
+              "fail the composition heuristic. Mostly seeds and round numbers; "
+              "a real short SHA citing an UNCONFIGURED repo lands here about 1 "
+              "time in 26. Add the repo rather than loosen the filter." % nd)
     print("repos searched for cross-repo citations: %s"
           % ", ".join(res["repos_searched"]))
     if f and not gate:

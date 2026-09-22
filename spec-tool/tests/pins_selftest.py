@@ -59,6 +59,33 @@ def run(root, sibs=(), branch="master"):
     return pins.scan(Path(root), branch, [Path(s) for s in sibs])
 
 
+def commit_resolvable(d: Path, msg: str, **files) -> str:
+    """A commit whose SHORT sha also passes the composition heuristic.
+
+    Why this exists, and it is not a convenience: the unresolvable case is the
+    one place composition still decides an outcome, because a token that
+    resolves in no repository has no other evidence. About 1 short SHA in 26 is
+    all-digits or all-hex-letters, so a fixture SHA landed there roughly one run
+    in twenty and `pins` correctly classified a REAL commit as noise — the
+    assertion below then failed for no visible reason.
+
+    **The tool is right and the fixture was underspecified.** Amending until the
+    short SHA is composition-passing states what the assertion is actually
+    about (an unresolvable citation the gate CAN see) instead of re-rolling the
+    dice until green. The dropped-as-noise residue is real, unavoidable without
+    more information, and is now COUNTED AND REPORTED by `pins` rather than
+    discarded silently — which is the half that was the actual defect.
+    """
+    sha = commit(d, msg, **files)
+    for n in range(64):
+        if pins.looks_like_sha(sha):
+            return sha
+        g(d, "commit", "-q", "--amend", "-m", "%s (%d)" % (msg, n))
+        sha = subprocess.run(["git", "-C", str(d), "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True).stdout.strip()
+    raise AssertionError("could not mint a composition-passing short sha")
+
+
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     home, sib = tmp / "home", tmp / "sib"
@@ -68,7 +95,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # sib: one public commit on master, one dev-only commit.
     sib_public = commit(sib, "public", **{"a.txt": "1"})
     g(sib, "checkout", "-q", "-b", "dev")
-    sib_dev = commit(sib, "dev only", **{"a.txt": "2"})
+    sib_dev = commit_resolvable(sib, "dev only", **{"a.txt": "2"})
     g(sib, "checkout", "-q", "master")
 
     # home: a public commit, then a dev-only one, plus the declared doc.
@@ -112,11 +139,63 @@ with tempfile.TemporaryDirectory() as tmp:
        and res["findings"][0]["rule"] == "pin-unresolvable",
        "got %r" % res.get("findings"))
 
+    print("\nnoise is DROPPED but never SILENT")
+    # The residue this counter exists for: a token that resolves nowhere and
+    # fails composition is discarded, and until it was counted the run reported
+    # its surface as fully measured. `20260716` is the honest case; a real short
+    # SHA citing a repo nobody configured is the ~1-in-26 case that looks
+    # identical from here. Reporting the count is what keeps "we did not look"
+    # from reading as "there was nothing to see".
+    commit(home, "seedy", **{"D.md": "# D\n\nseed `20260716` and `1000000`.\n"})
+    code, res = run(home, [sib])
+    ok("a seed resolving nowhere is not a finding",
+       code == pins.CLEAN, "got %r" % res.get("findings"))
+    ok("...and it is COUNTED as dropped noise, not silently discarded",
+       res.get("noise_dropped", 0) >= 1, "noise_dropped=%r" % res.get("noise_dropped"))
+    ok("dropped noise is excluded from tokens_considered",
+       res["tokens_considered"] == 0, "considered=%r" % res["tokens_considered"])
+
     print("\ncontent hashes are the fix, never the finding")
     sha256 = "b5484e84dd2cddfa7d3cc8a041deba92cb29615aedb2180e31d8b6910ac5b648"
     commit(home, "content hash", **{"D.md": "# D\n\nartifact `%s`.\n" % sha256})
     code, res = run(home, [sib])
     ok("a 64-hex sha256 is never flagged",
+       code == pins.CLEAN, "got %r" % res.get("findings"))
+
+    print("\ncomposition is a noise filter, and it runs LAST")
+    # The hole this closes: `looks_like_sha` requires both a digit and a hex
+    # letter, on a docstring claim that a real hash failing that is "~1 in 10^8".
+    # That is the figure for a FULL 40-char SHA; the corpus cites SHORT ones,
+    # where the true rate is (10/16)^7 + (6/16)^7 — about 1 in 26. Applied
+    # before resolution, it discarded real citations unread and called the
+    # surface measured. It also made this very file flake at roughly that rate:
+    # the fixtures build real repos, so ~1 run in 20 produced a rejected SHA.
+    ok("an all-digit short SHA fails the composition heuristic",
+       not pins.looks_like_sha("1234567"))
+    ok("an all-letter short SHA fails it too",
+       not pins.looks_like_sha("abcdefa"))
+    ok("...but a NAMED hex word is excluded at any stage",
+       pins.never_a_sha("deadbeef") and pins.never_a_sha("0b11100"))
+
+    _real = pins.resolve_in
+    try:
+        # A token git CAN look up is a commit whatever it is made of. Forced
+        # rather than generated, because a fixture cannot choose its own SHA.
+        pins.resolve_in = lambda repo, tok: tok == "1234567" or _real(repo, tok)
+        commit(home, "all-digit pin", **{
+            "D.md": "# D\n\nsee `1234567`\n", "NOTDECLARED.md": "x\n"})
+        code, res = run(home, [sib])
+        ok("a resolvable all-digit SHA is NOT discarded as noise",
+           any(f["sha"] == "1234567" for f in res["findings"]),
+           "got %r" % res["findings"])
+    finally:
+        pins.resolve_in = _real
+
+    # And the filter still does its job on what resolves nowhere.
+    commit(home, "a seed is not a pin", **{
+        "D.md": "# D\n\nseed `20260716`, count `1000000`\n"})
+    code, res = run(home, [sib])
+    ok("an unresolvable digits-only token is still suppressed",
        code == pins.CLEAN, "got %r" % res.get("findings"))
 
     print("\nscope is the keep-list, not the tree")

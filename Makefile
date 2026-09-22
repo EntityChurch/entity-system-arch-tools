@@ -154,7 +154,7 @@ compile:
 		spec-tool/cli.py spec-tool/model.py spec-tool/render.py spec-tool/topology.py \
 		spec-tool/standards.py spec-tool/style.py spec-tool/corpus.py \
 		spec-tool/coherence.py spec-tool/ledger.py spec-tool/provenance.py \
-		spec-tool/pins.py \
+		spec-tool/pins.py spec-tool/inbound.py \
 		spec-tool/convergence.py spec-tool/config.py && echo "✓ spec-tool package compiles"
 
 # --- ADR-0019 Tier-1 verbs (over the tool's OWN code) -----------------------
@@ -178,6 +178,9 @@ test: compile parity
 	@$(PYTHON) spec-tool/tests/pins_selftest.py
 	@$(PYTHON) spec-tool/tests/census_selftest.py
 	@$(PYTHON) spec-tool/tests/register_selftest.py
+	@$(PYTHON) spec-tool/tests/inbound_selftest.py
+	@$(PYTHON) spec-tool/tests/inventory_selftest.py
+	@$(PYTHON) spec-tool/tests/declare_selftest.py
 
 lint: compile
 
