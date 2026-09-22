@@ -67,6 +67,28 @@ def build(tmp: Path, ledger: str, seats: dict) -> Path:
     return peers
 
 
+def build_raw(tmp: Path, own_files: dict, seats: dict) -> Path:
+    """Like `build`, but the own-tree files are given explicitly.
+
+    `build` always writes `docs/COHORT-OPEN-ITEMS.md`, which makes the
+    hardcoded-ledger defect untestable through it — the fixture supplied the
+    very file whose absence WAS the bug. Keys are corpus-relative paths.
+    """
+    _CASE[0] += 1
+    peers = tmp / ("eco%d" % _CASE[0])
+    us = peers / "entity-system-architecture"
+    us.mkdir(parents=True, exist_ok=True)
+    for rel, body in own_files.items():
+        f = us / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(body, encoding="utf-8")
+    for repo, files in seats.items():
+        d = peers / repo / "docs" / "status"
+        d.mkdir(parents=True, exist_ok=True)
+        for fn, body in files.items():
+            (d / fn).write_text(body, encoding="utf-8")
+    return peers
+
 def run(tmp: Path, ledger: str, seats: dict):
     peers = build(tmp, ledger, seats)
     return inbound.scan(peers / "entity-system-architecture", peers)
@@ -325,6 +347,106 @@ def main() -> int:
         ok("a cited packet is still cited after collapse, and counted once",
            res["cited"] == 1 and not res["owed"]
            and len(res["collapsed_clones"]) == 1, res)
+
+
+        # ---- 9. THE HARDCODED LEDGER, both directions --------------------
+        # `LEDGERS` was a one-element tuple, so this gate answered
+        # COULD-NOT-LOOK for every seat that does not keep a file at that exact
+        # path — i.e. every seat but one, while the ecosystem standard tells
+        # all of them to run it. Reported with the file:line by the seat it
+        # broke for, who correctly declined to widen it themselves.
+        PKT = {"entity-core-go": {
+            "ROUTING-2026-09-01-a-a-real-packet.md": TO_ARCH}}
+
+        # (a) NEGATIVE CONTROL — no reconciled view of any kind.
+        pr = build_raw(tmp, {"README.md": "nothing here\n"}, PKT)
+        code, res = inbound.scan(pr / "entity-system-architecture", pr)
+        ok("no ledger and no tracker is COULD-NOT-LOOK",
+           code == inbound.CANNOT_LOOK and "error" in res, res)
+        ok("the could-not-look names --ledger as the way out",
+           "--ledger" in res.get("error", ""), res.get("error"))
+
+        # (b) a seat keeping ONLY per-counterpart trackers HAS a ledger.
+        pr = build_raw(
+            tmp,
+            {"docs/status/TRACKER-entity-core-go.md":
+                "| **A-1** | see `ROUTING-2026-09-01-a` | OPEN |\n"},
+            PKT)
+        code, res = inbound.scan(pr / "entity-system-architecture", pr)
+        ok("own-tree TRACKER-*.md counts as a reconciled view",
+           code != inbound.CANNOT_LOOK, res)
+        ok("a citation inside an own tracker discharges the packet",
+           res.get("cited") == 1 and not res.get("owed"), res)
+        ok("the tracker is reported among the surfaces actually read",
+           any("TRACKER-entity-core-go.md" in x for x in res["ledgers"]),
+           res.get("ledgers"))
+
+        # (c) ...and it still FIRES when that tracker cites nothing.
+        pr = build_raw(
+            tmp,
+            {"docs/status/TRACKER-entity-core-go.md": "nothing cited here\n"},
+            PKT)
+        code, res = inbound.scan(pr / "entity-system-architecture", pr)
+        ok("an own tracker citing nothing leaves the packet owed",
+           code == inbound.VIOLATIONS and len(res["owed"]) == 1, res)
+
+        # (d) --ledger wins OUTRIGHT; the default is not silently appended.
+        pr = build_raw(
+            tmp,
+            {"docs/COHORT-OPEN-ITEMS.md": "cites `ROUTING-2026-09-01-a`\n",
+             "docs/other/MY-LEDGER.md": "cites nothing\n"},
+            PKT)
+        code, res = inbound.scan(pr / "entity-system-architecture", pr,
+                                 ["docs/other/MY-LEDGER.md"])
+        ok("--ledger overrides rather than appends",
+           res["ledgers"] == ["docs/other/MY-LEDGER.md"], res.get("ledgers"))
+        ok("so a citation in the DEFAULT file no longer credits",
+           code == inbound.VIOLATIONS and len(res["owed"]) == 1, res)
+        ok("ledger_default_used records which mode ran",
+           res.get("ledger_default_used") is False, res)
+
+        # (e) THE SAFETY DIRECTION: trackers STAND IN for a missing ledger,
+        # they never SUPPLEMENT a present one. Widening what counts as a
+        # discharge is the dangerous direction for an inbox gate.
+        pr = build_raw(
+            tmp,
+            {"docs/COHORT-OPEN-ITEMS.md": "cites nothing\n",
+             "docs/status/TRACKER-entity-core-go.md":
+                 "cites `ROUTING-2026-09-01-a`\n"},
+            PKT)
+        code, res = inbound.scan(pr / "entity-system-architecture", pr)
+        ok("an own tracker does NOT supplement a ledger that exists",
+           res["ledgers"] == ["docs/COHORT-OPEN-ITEMS.md"], res.get("ledgers"))
+        ok("so the packet stays owed rather than being credited by it",
+           code == inbound.VIOLATIONS and len(res["owed"]) == 1, res)
+
+        # ---- 10. A PEER TRACKER IS A SURFACE, NEVER A DISCHARGE ----------
+        # Two application seats recovered unread packets by reconciling against
+        # a counterpart's tracker, one of them in about two minutes. The glob
+        # is `ROUTING-*`, so the surface that actually worked was invisible to
+        # every run this gate had ever done.
+        pr = build_raw(
+            tmp,
+            {"docs/COHORT-OPEN-ITEMS.md": "nothing cited\n"},
+            {"entity-core-go": {
+                "ROUTING-2026-09-01-a-a-real-packet.md": TO_ARCH,
+                "TRACKER-entity-system-architecture.md": "what we carry\n",
+                "TRACKER-entity-core-rust.md": "not about us\n",
+            }})
+        code, res = inbound.scan(pr / "entity-system-architecture", pr)
+        names = {Path(t["file"]).name for t in res["peer_trackers"]}
+        ok("a peer TRACKER naming us is reported",
+           names == {"TRACKER-entity-system-architecture.md"}, names)
+        ok("a peer TRACKER naming someone else is NOT reported",
+           "TRACKER-entity-core-rust.md" not in names, names)
+        ok("the tracker's seat is attributed",
+           res["peer_trackers"][0]["seat"] == "entity-core-go",
+           res["peer_trackers"])
+        # THE LOAD-BEARING NEGATIVE: an index must not discharge a delivery.
+        ok("a peer tracker does NOT discharge the packet beside it",
+           code == inbound.VIOLATIONS and len(res["owed"]) == 1, res)
+        ok("and it is not folded into the packet count",
+           res["scanned"] == 1, res["scanned"])
 
     # -- a stem with an internal dot is citable ----------------------------
     # `ROUTING-2026-08-04-s10.3-seam-...` names a spec SECTION in its slug. The

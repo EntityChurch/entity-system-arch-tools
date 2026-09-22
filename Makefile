@@ -185,6 +185,7 @@ test: compile parity
 	@$(PYTHON) spec-tool/tests/inbound_selftest.py
 	@$(PYTHON) spec-tool/tests/inventory_selftest.py
 	@$(PYTHON) spec-tool/tests/declare_selftest.py
+	@$(PYTHON) spec-tool/tests/deps_selftest.py
 
 lint: compile
 

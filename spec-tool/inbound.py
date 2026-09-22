@@ -6,6 +6,8 @@
     spec inbound --owed                # just the worklist, one path per line
     spec inbound --unaddressed         # the packets nobody can route mechanically
     spec inbound --peers DIR           # where the sibling repos live
+    spec inbound --ledger PATH         # this corpus's reconciled view (repeatable)
+    spec inbound --trackers            # peer TRACKER files naming this corpus
     spec inbound --json
 
 WHAT THIS GATES, AND THE FAILURE IT IS BUILT ON
@@ -76,12 +78,52 @@ from typing import Dict, List, Optional, Tuple
 
 CLEAN, VIOLATIONS, CANNOT_LOOK = 0, 1, 2
 
-# The reconciled view a packet is expected to reach. Kept as a list so a repo
-# that splits its ledger does not silently lose the check.
+# The reconciled view a packet is expected to reach.
+#
+# **This was a one-element tuple and it made the gate unusable by every seat but
+# one `[2026-09-15]`.** `AGENTS-STANDARD.md` tells every repo in the ecosystem to
+# point this gate at its own tree — and only the architecture seat keeps a file at
+# this path, so `spec inbound --root .` anywhere else returned COULD-NOT-LOOK.
+# The generation seat found it, named this line by file:line, and correctly
+# declined to widen it on the grounds that the ledger convention was not theirs
+# to set. **Fifth could-not-look in this toolkit** (`address` without
+# `--namespace-root`, `provenance` without `--proposal-root`, `coverage` reading
+# the class map, `pins`' composition filter) — and the first where the scope was
+# wrong for everyone except the author.
+#
+# So: a DEFAULT, not a constant. `--ledger` overrides it, and when nothing is
+# passed the own-tree `TRACKER-*.md` files count as reconciled surfaces too —
+# because for several seats that is where the reconciled view actually lives.
 LEDGERS = ("docs/COHORT-OPEN-ITEMS.md",)
+
+# The own-tree fallback: per-counterpart trackers. `SEAT-CLEANUP-INSTRUCTIONS`
+# told every seat to keep one of these, so a seat with no COHORT-OPEN-ITEMS.md
+# is not a seat with no ledger.
+OWN_TRACKER_GLOB = "TRACKER-*.md"
 
 PACKET_GLOB = "ROUTING-*.md"
 PACKET_DIR = "docs/status"
+
+# ----------------------------------------------------------------------------
+# A PEER'S TRACKER ADDRESSED TO US IS AN INBOUND SURFACE, AND THE GLOB MISSED IT
+#
+# `iter_packets` globs `ROUTING-*`. A peer's `docs/status/TRACKER-<us>.md` is a
+# standing index of everything that seat is carrying to us, it is not a
+# `ROUTING-*` file, and it was therefore invisible to every run this gate has
+# ever done — while being, in practice, **the surface that actually recovers
+# unread packets.** Two application seats independently reported recovering
+# packets by reconciling against a counterpart's tracker, one of them in about
+# two minutes, in the same week a third seat reported the hardcoded-ledger
+# defect above.
+#
+# **Counted SEPARATELY and never merged into the packet count.** A tracker is a
+# standing index; a packet is a delivery event. Merging them would let one
+# tracker citation discharge the packets it indexes, which is the same
+# unit-mismatch that let nine numbered asks sit green behind one cited packet
+# (`docs/COHORT-OPEN-ITEMS.md` §0bz). The gate reports the surface; a human
+# reads it.
+# ----------------------------------------------------------------------------
+PEER_TRACKER_GLOB = "TRACKER-*.md"
 
 # How this corpus is spelled when someone addresses it. Repo directory name
 # plus the short forms the ecosystem actually writes — measured, not assumed:
@@ -296,6 +338,31 @@ def iter_packets(peers: Path, self_name: str) -> List[Path]:
     return found
 
 
+def peer_trackers(peers: Path, self_name: str,
+                  aliases: Tuple[str, ...]) -> List[Path]:
+    """A sibling's `docs/status/TRACKER-<us>.md` — a standing index aimed at us.
+
+    Matched on the filename's alias token rather than on file contents, because
+    a tracker names its counterpart in its own name and that is the cheap,
+    unambiguous signal. `names_us` is reused so the substring guard that keeps
+    `rust` from firing inside `entity-browser-rust` applies here too.
+    """
+    found: List[Path] = []
+    for repo in sorted(pp for pp in peers.iterdir() if pp.is_dir()):
+        if repo.name == self_name or repo.name.startswith("."):
+            continue
+        d = repo / PACKET_DIR
+        if not d.is_dir():
+            continue
+        for f in sorted(d.glob(PEER_TRACKER_GLOB)):
+            # strip the `TRACKER-` prefix and the extension before matching, so
+            # `TRACKER-entity-system-architecture.md` yields the bare name.
+            subject = f.stem[len("TRACKER-"):]
+            if names_us(subject, aliases):
+                found.append(f)
+    return found
+
+
 def dedupe_clones(packets: List[Path]) -> Tuple[List[Path], List[dict]]:
     """Collapse byte-identical packets held by working clones of one repository.
 
@@ -348,7 +415,8 @@ def dedupe_clones(packets: List[Path]) -> Tuple[List[Path], List[dict]]:
     return canonical, collapsed
 
 
-def scan(root: Path, peers: Optional[Path] = None) -> Tuple[int, dict]:
+def scan(root: Path, peers: Optional[Path] = None,
+         ledgers: Optional[List[str]] = None) -> Tuple[int, dict]:
     root = root.resolve()
     self_name = root.name
     aliases = ALIASES.get(self_name)
@@ -367,9 +435,29 @@ def scan(root: Path, peers: Optional[Path] = None) -> Tuple[int, dict]:
             "error": "peer root %s is not a directory — nothing was scanned"
                      % peers}
 
+    # --- which files are this corpus's reconciled view? -------------------
+    # Explicit `--ledger` wins outright. Otherwise the default path, PLUS the
+    # own-tree per-counterpart trackers — a seat that keeps only trackers has a
+    # ledger, and reporting it as could-not-look was the defect.
+    explicit = bool(ledgers)
+    candidates: List[str] = list(ledgers) if ledgers else list(LEDGERS)
+    if not explicit and not any((root / rel).is_file() for rel in candidates):
+        # FALLBACK ONLY, and the "only" is the whole safety argument.
+        #
+        # The defect was COULD-NOT-LOOK for a seat with no file at the default
+        # path. Adding trackers *beside* an existing ledger would instead widen
+        # what counts as a discharge — and for an inbox gate, over-crediting is
+        # the dangerous direction: a spurious row is read once and dismissed, a
+        # packet that never appears is the failure this gate exists to prevent.
+        # So trackers stand in for a missing ledger; they never supplement one.
+        own = root / PACKET_DIR
+        if own.is_dir():
+            candidates = ["%s/%s" % (PACKET_DIR, f.name)
+                          for f in sorted(own.glob(OWN_TRACKER_GLOB))]
+
     ledger_text = ""
     seen_ledger = []
-    for rel in LEDGERS:
+    for rel in candidates:
         p = root / rel
         if p.is_file():
             try:
@@ -380,7 +468,14 @@ def scan(root: Path, peers: Optional[Path] = None) -> Tuple[int, dict]:
     if not seen_ledger:
         return CANNOT_LOOK, {
             "error": "none of %s exist under %s — there is nothing to "
-                     "reconcile packets against" % (", ".join(LEDGERS), root)}
+                     "reconcile packets against. Pass --ledger PATH if this "
+                     "corpus keeps its reconciled view somewhere else; a "
+                     "missing default is not an empty inbox"
+                     % (", ".join(candidates), root)}
+
+    trackers = peer_trackers(peers, self_name, aliases)
+    tracker_recs = [{"file": str(t), "seat": t.parents[2].name}
+                    for t in trackers]
 
     packets = iter_packets(peers, self_name)
     packets, collapsed = dedupe_clones(packets)
@@ -486,12 +581,16 @@ def scan(root: Path, peers: Optional[Path] = None) -> Tuple[int, dict]:
         "ambiguous_citations": ambiguous,
         "addressed_elsewhere": other,
         "by_seat": by_seat,
+        # A standing index a peer keeps aimed at us. Reported, never merged:
+        # a tracker is not a delivery event and must not discharge one.
+        "peer_trackers": tracker_recs,
+        "ledger_default_used": not explicit,
     }
     return (VIOLATIONS if owed else CLEAN), res
 
 
-def report(res: dict, gate: bool, owed_only: bool, unaddressed_only: bool
-           ) -> None:
+def report(res: dict, gate: bool, owed_only: bool, unaddressed_only: bool,
+           trackers_only: bool = False) -> None:
     if "error" in res:
         print("could not look: %s" % res["error"], file=sys.stderr)
         return
@@ -502,6 +601,10 @@ def report(res: dict, gate: bool, owed_only: bool, unaddressed_only: bool
     if unaddressed_only:
         for o in res["unaddressed"]:
             print(o["file"])
+        return
+    if trackers_only:
+        for t in res.get("peer_trackers", []):
+            print(t["file"])
         return
 
     for seat in sorted(res["by_seat"], key=lambda k: -res["by_seat"][k]):
@@ -519,6 +622,15 @@ def report(res: dict, gate: bool, owed_only: bool, unaddressed_only: bool
         print("%d further packet(s) copy us without addressing us — a lower "
               "obligation, counted separately, not merged."
               % len(res["cc_owed"]))
+    if res.get("peer_trackers"):
+        seats = sorted({t["seat"] for t in res["peer_trackers"]})
+        print("%d peer TRACKER file(s) name this corpus (%s) — a standing index "
+              "of what those seats are carrying to us. NOT counted above and "
+              "never discharged by a citation: a tracker is an index, a packet "
+              "is a delivery event. Read them."
+              % (len(res["peer_trackers"]), ", ".join(seats)))
+        for t in res["peer_trackers"]:
+            print("    %s" % t["file"])
     if res["unaddressed"]:
         print("%d packet(s) name no recipient this gate can parse. That is "
               "UNKNOWN, never 'not ours' — read them or give them a **To:** "
@@ -560,6 +672,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="print only the worklist, one path per line")
     ap.add_argument("--unaddressed", action="store_true",
                     help="print the packets with no parseable recipient")
+    ap.add_argument("--ledger", action="append", default=None, metavar="PATH",
+                    help="corpus-relative path to a reconciled-view document; "
+                         "repeatable. Default: docs/COHORT-OPEN-ITEMS.md plus "
+                         "this tree's own docs/status/TRACKER-*.md")
+    ap.add_argument("--trackers", action="store_true",
+                    help="print only the peer TRACKER files naming this corpus")
     ap.add_argument("--json", action="store_true", help="emit JSON")
     args = ap.parse_args(argv)
 
@@ -571,11 +689,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         except Exception:  # noqa: BLE001
             root = Path.cwd()
 
-    code, res = scan(Path(root), args.peers)
+    code, res = scan(Path(root), args.peers, args.ledger)
     if args.json:
         print(json.dumps(res, indent=1))
     else:
-        report(res, args.gate, args.owed, args.unaddressed)
+        report(res, args.gate, args.owed, args.unaddressed,
+               args.trackers)
     if code == CANNOT_LOOK:
         return CANNOT_LOOK
     return code if args.gate else CLEAN

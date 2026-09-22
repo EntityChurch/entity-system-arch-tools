@@ -9,6 +9,7 @@ that reads the one shared model (`model.py`) and the one config
     spec tree <file> [--symbols|--refs|--json|--level N]   structural tree (reader)
     spec render <file> [--what …|--format …|--output …]    catalogs (reader)
     spec topology [ROOT] [--json|--dot]                    corpus graph (reader)
+    spec deps [ROOT] [--closure SPEC|--beside]             declared Depends graph (reader)
     spec coverage [ROOT] [--gaps|--json]                   spec -> guide/proposal/research (reader)
     spec address [ROOT] [--owed|--worklist …|--gate|--json] §11 addressing validator
     spec standards [--root …|--refine|--json]              release-readiness gate
@@ -89,6 +90,7 @@ import render
 import standards
 import style
 import topology
+import deps
 
 # subcommand -> the module main(argv) it delegates to. Args after the
 # subcommand are passed through verbatim, so each command behaves exactly as
@@ -97,6 +99,7 @@ DELEGATES = {
     "tree": model.main,
     "render": render.main,
     "topology": topology.main,
+    "deps": deps.main,
     "address": address.main,
     "standards": standards.main,
     "coherence": coherence.main,
