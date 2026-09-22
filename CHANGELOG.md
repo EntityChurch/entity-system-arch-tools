@@ -7,6 +7,10 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 
 ## [Unreleased]
 
+Development lands on `dev`; `master` carries the last release.
+
+## [0.9.0] — 2026-09-21
+
 ### Changed in ways that can break an existing caller
 
 The surface this project promises to keep is the `spec` CLI — subcommand and flag names, the
