@@ -634,6 +634,58 @@ oracle_paths = ["tools/e2e/"]
 [analyzer.vocab]
 app_seats = ["entity-browser-rust", "entity-workbench-go"]
 
+[analyzer.arms]
+# What does the pseudocode REFUSE, and does the prose table enumerating that
+# class list it? `L23`'s pseudocode axis, fourth shape — the polarity that makes
+# a reader confidently WRONG instead of blind.
+#
+# Founding incident: `ENTITY-CORE-PROTOCOL` §6.5's dispatch block routed a
+# corrupted ROOT entity hash to `400 hash_mismatch` from 0.8.2.25; §4.11's cause
+# table carried an `included` row and no root row. `entity-system-conformance`
+# read the table and published "no section assigns one" — correct about the
+# table, false about the corpus, and the right call on their part, since they
+# refused to invent a code with no home.
+#
+# READER ONLY, no rules table, never gates. The unit of the defect is the
+# (cause, code) arm and a cause is PROSE: the two causes in the incident share
+# no token. A gate keyed on the code scores the incident CLEAN (the code is in
+# both homes); a gate keyed on arm counts fires on every document where a block
+# and a table legitimately differ. So this makes the comparison cheap and leaves
+# the judgement where it belongs.
+dirs = ["specs", "guides"]
+
+[analyzer.sections]
+# Does a section number identify exactly one section? Every citation in this
+# ecosystem is `DOCUMENT §N`, and nothing checked the number was unique inside
+# its own document. `address` finds the FIRST heading that matches and stops,
+# so a number declared twice resolves cleanly and silently to the wrong one.
+#
+# Two founding incidents, both live, both cited by other seats' product code:
+# `GUIDE-CONFORMANCE` carried two `§3.1` (filed by the conformance seat as
+# `CQ-43`), and `EXTENSION-ROLE` carried two `1.5` — that one reported by
+# nobody, found by widening the search that answered CQ-43. In both the tell
+# was the same: a section inserted out of numeric order onto a number already
+# taken.
+dirs = ["specs", "guides"]
+
+[analyzer.sections.rules]
+# One number, two sections. There is no legitimate instance — the number is the
+# citation handle, and a handle naming two things names neither. The gate names
+# the collision and does not pick the winner: which side renumbers depends on
+# whose citations are cheapest to repair, and that is a judgement.
+duplicate-section = "error"
+# Out of order is the PREDICTOR, not the defect, and it does not gate. The live
+# corpus has correct-but-unordered text (`GUIDE-CONFORMANCE` lands §5.2c/§5.2d
+# after §5.3) where every citation still resolves to exactly one section.
+# Gating that files accusations against text with nothing wrong with it, and a
+# gate that cries wolf teaches people to skip it.
+section-out-of-order = "warning"
+# A placeholder is not a number. Named as owed by
+# PROPOSAL-CORPUS-REFERENCE-INTEGRITY §2 and unbuilt for two weeks. WARNING,
+# because `§X` is also correct English for "an arbitrary section" — two guides
+# use it that way deliberately, and accusing them is the expensive direction.
+placeholder-section = "warning"
+
 [analyzer.roster]
 # A spec's version is declared once (the header, source of truth) and copied
 # into the living roadmaps and the tier standards' members tables. Neither end

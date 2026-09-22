@@ -19,6 +19,8 @@ that reads the one shared model (`model.py`) and the one config
     spec convergence [--window N|--json]                   spec rate-of-change + pipeline
     spec charter [--charter …|--agents …|--json]           the discipline set, both homes
     spec roster [--gate|--owed|--json]                     roadmap version columns vs spec headers
+    spec sections [--gate|--owed|--json]                   one section number, one section
+    spec arms [--doc N|--owed|--json]                      what a block refuses vs what the table enumerates
     spec shape [ROOT] [--paths|--json]                     path -> specifying document (advisory reader)
     spec expiry  [--gate|--owed|--json]                    tracker rows whose EVIDENCE died
     spec ledger [--root …|--json]                          declared counts vs the directories
@@ -29,6 +31,7 @@ that reads the one shared model (`model.py`) and the one config
     spec census [--doc …|--drift|--gaps|--json]            normative surface vs the cohort's own citations
     spec vocab  [--prefix …|--owed|--gate|--json]          app-tier TYPE VOCABULARY: does the field converge?
     spec sdksync [--root …|--json|--unpinned|--update]      SDK restatements vs their sources
+    spec pointers [--namespace-root R|--gate|--unpinned]    declared pointers vs the authority they name
     spec provenance [--since REF|--proposal-root R|--json] L1: normative spec edit needs a proposal
     spec check                                             run all three gates (style + standards + coherence)
     spec config [CONFIG.toml]                              print the resolved config
@@ -75,6 +78,8 @@ import census
 import vocab
 import charter
 import roster
+import arms
+import sections
 import shape
 import expiry
 import ledger
@@ -83,6 +88,7 @@ import inventory
 import declare
 import register
 import sdksync
+import pointers
 import pins
 import provenance
 import model
@@ -111,6 +117,8 @@ DELEGATES = {
     "vocab": vocab.main,
     "charter": charter.main,
     "roster": roster.main,
+    "arms": arms.main,
+    "sections": sections.main,
     "shape": shape.main,
     "expiry": expiry.main,
     "ledger": ledger.main,
@@ -119,6 +127,7 @@ DELEGATES = {
     "declare": declare.main,
     "register": register.main,
     "sdksync": sdksync.main,
+    "pointers": pointers.main,
     "provenance": provenance.main,
     "pins": pins.main,
 }
